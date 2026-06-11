@@ -44,6 +44,8 @@ def _nav_items() -> list[dict[str, str]]:
         {"label": "Roadmap", "endpoint": "roadmap"},
         {"label": "Active Work", "endpoint": "active_work"},
         {"label": "Daily Logs", "endpoint": "daily_logs"},
+        {"label": "Inbox", "endpoint": "inbox"},
+        {"label": "Inbox / New", "endpoint": "inbox_new"},
         {"label": "Decisions", "endpoint": "category_view", "category": "04-decisions"},
         {"label": "Release Notes", "endpoint": "category_view", "category": "05-release-notes"},
         {"label": "Ideas", "endpoint": "category_view", "category": "06-ideas"},
@@ -55,6 +57,18 @@ def _category_files(category: str) -> list[str]:
     if not root.exists():
         return []
     return [str(path.relative_to(WORKLOG_ROOT)) for path in sorted(root.rglob("*.md"))]
+
+
+def _pretty_title(path: str) -> str:
+    mapping = {
+        "ims.md": "IMS",
+        "dispatch.md": "Dispatch",
+        "parking.md": "Parking",
+        "unity.md": "Unity",
+        "core.md": "Core",
+        "cy-storage.md": "CY Storage",
+    }
+    return mapping.get(Path(path).name, Path(path).stem.replace("-", " ").title())
 
 
 @app.context_processor
@@ -82,8 +96,16 @@ def dashboard():
             "path": "00-dashboard/blockers.md",
         },
         {
-            "title": "Today’s Log",
+            "title": "Next Actions",
+            "path": "00-dashboard/next-actions.md",
+        },
+        {
+            "title": "Today’s Daily Log",
             "path": _latest_daily_log() or "01-daily-logs/2026/06/2026-06-11.md",
+        },
+        {
+            "title": "Inbox / New Items",
+            "path": "04-inbox/new/example-inbox-item.md",
         },
     ]
     rendered = []
@@ -104,7 +126,7 @@ def roadmap():
         "02-roadmap/cy-storage-roadmap.md",
         "02-roadmap/parking-roadmap.md",
     ]
-    sections = [{"path": path, "title": Path(path).stem.replace("-", " ").title(), "html": _render_markdown(_read_markdown(path))} for path in files]
+    sections = [{"path": path, "title": _pretty_title(path), "html": _render_markdown(_read_markdown(path))} for path in files]
     return render_template("section.html", title="Roadmap", sections=sections)
 
 
@@ -115,8 +137,10 @@ def active_work():
         "03-active-work/dispatch.md",
         "03-active-work/parking.md",
         "03-active-work/unity.md",
+        "03-active-work/core.md",
+        "03-active-work/cy-storage.md",
     ]
-    sections = [{"path": path, "title": Path(path).stem.replace("-", " ").title(), "html": _render_markdown(_read_markdown(path))} for path in files]
+    sections = [{"path": path, "title": _pretty_title(path), "html": _render_markdown(_read_markdown(path))} for path in files]
     return render_template("section.html", title="Active Work", sections=sections)
 
 
@@ -139,6 +163,44 @@ def release_notes():
 @app.route("/ideas")
 def ideas():
     return render_template("listing.html", title="Ideas", items=_category_files("06-ideas"))
+
+
+@app.route("/inbox")
+def inbox():
+    items = [
+        "04-inbox/new/example-inbox-item.md",
+        *sorted(str(path.relative_to(WORKLOG_ROOT)) for path in (WORKLOG_ROOT / "04-inbox/triaged").glob("*.md")),
+        *sorted(str(path.relative_to(WORKLOG_ROOT)) for path in (WORKLOG_ROOT / "04-inbox/bugs").glob("*.md")),
+        *sorted(str(path.relative_to(WORKLOG_ROOT)) for path in (WORKLOG_ROOT / "04-inbox/features").glob("*.md")),
+        *sorted(str(path.relative_to(WORKLOG_ROOT)) for path in (WORKLOG_ROOT / "04-inbox/support").glob("*.md")),
+        *sorted(str(path.relative_to(WORKLOG_ROOT)) for path in (WORKLOG_ROOT / "04-inbox/closed").glob("*.md")),
+    ]
+    return render_template("listing.html", title="Inbox", items=items)
+
+
+@app.route("/inbox/new")
+def inbox_new():
+    return render_template("listing.html", title="Inbox / New", items=_category_files("04-inbox/new"))
+
+
+@app.route("/inbox/bugs")
+def inbox_bugs():
+    return render_template("listing.html", title="Inbox / Bugs", items=_category_files("04-inbox/bugs"))
+
+
+@app.route("/inbox/features")
+def inbox_features():
+    return render_template("listing.html", title="Inbox / Features", items=_category_files("04-inbox/features"))
+
+
+@app.route("/inbox/support")
+def inbox_support():
+    return render_template("listing.html", title="Inbox / Support", items=_category_files("04-inbox/support"))
+
+
+@app.route("/inbox/closed")
+def inbox_closed():
+    return render_template("listing.html", title="Inbox / Closed", items=_category_files("04-inbox/closed"))
 
 
 @app.route("/view/<path:relative_path>")
@@ -167,4 +229,3 @@ def category_view(category: str):
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5075, debug=False)
-

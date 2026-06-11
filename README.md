@@ -2,6 +2,13 @@
 
 Read-only Flask viewer for the FSFT worklog markdown repository.
 
+## Purpose
+
+- KB = how the platform works
+- Worklog = what we did, what is next, bugs, features, support issues, and where we left off
+- Codex should update the Worklog after meaningful work
+- Codex should update the KB only when architecture, runbooks, infrastructure, auth, deployment, or business rules change
+
 ## Content Root
 
 The viewer reads markdown from:
@@ -32,6 +39,12 @@ python3 app.py
 - `/roadmap`
 - `/active-work`
 - `/daily-logs`
+- `/inbox`
+- `/inbox/new`
+- `/inbox/bugs`
+- `/inbox/features`
+- `/inbox/support`
+- `/inbox/closed`
 - `/decisions`
 - `/release-notes`
 - `/ideas`
@@ -41,4 +54,3 @@ python3 app.py
 ## Systemd Example
 
 See `worklog-dev.service.example`.
-

@@ -27,7 +27,6 @@
               {% set view_args = request.view_args or {} %}
               <a class="px-2 py-1 rounded {% if request.endpoint == item.endpoint and (not item.category or view_args.get('category') == item.category) %}active bg-dark{% endif %}" href="{% if item.endpoint == 'category_view' %}{{ url_for(item.endpoint, category=item.category) }}{% else %}{{ url_for(item.endpoint) }}{% endif %}">{{ item.label }}</a>
             {% endfor %}
-            <a class="px-2 py-1 rounded {% if request.endpoint == 'view_file' %}active bg-dark{% endif %}" href="{{ url_for('dashboard') }}">Dashboard</a>
           </nav>
         </aside>
         <main class="col-12 col-md-9 col-xl-10 p-4">
