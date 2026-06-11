@@ -1,0 +1,15 @@
+[Unit]
+Description=FSFT Worklog Viewer (DEV)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/fsftdev/worklog-viewer
+ExecStart=/usr/bin/python3 /opt/fsftdev/worklog-viewer/app.py
+Restart=always
+RestartSec=2
+Environment=WORKLOG_ROOT=/opt/fsftdev/fsft-worklog
+
+[Install]
+WantedBy=multi-user.target
+

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1 class="h3 mb-2">{{ title }}</h1>
+  <div class="text-secondary mb-3">{{ relative_path }}</div>
+  <div class="card card-shadow">
+    <div class="card-body doc-body">
+      {{ html | safe }}
+    </div>
+  </div>
+{% endblock %}
+

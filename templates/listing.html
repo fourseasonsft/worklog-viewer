@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1 class="h3 mb-3">{{ title }}</h1>
+  <div class="card card-shadow">
+    <div class="card-body">
+      {% if items %}
+        <ul class="mb-0">
+          {% for item in items %}
+            <li><a href="{{ url_for('view_file', relative_path=item) }}">{{ item }}</a></li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <div class="text-secondary">No files yet.</div>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}
+
