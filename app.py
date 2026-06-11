@@ -44,8 +44,11 @@ def _nav_items() -> list[dict[str, str]]:
         {"label": "Roadmap", "endpoint": "roadmap"},
         {"label": "Active Work", "endpoint": "active_work"},
         {"label": "Daily Logs", "endpoint": "daily_logs"},
+        {"label": "Runbooks", "endpoint": "runbooks"},
         {"label": "Inbox", "endpoint": "inbox"},
         {"label": "Inbox / New", "endpoint": "inbox_new"},
+        {"label": "Inbox / Bugs", "endpoint": "inbox_bugs"},
+        {"label": "Inbox / Features", "endpoint": "inbox_features"},
         {"label": "Decisions", "endpoint": "category_view", "category": "04-decisions"},
         {"label": "Release Notes", "endpoint": "category_view", "category": "05-release-notes"},
         {"label": "Ideas", "endpoint": "category_view", "category": "06-ideas"},
@@ -163,6 +166,11 @@ def release_notes():
 @app.route("/ideas")
 def ideas():
     return render_template("listing.html", title="Ideas", items=_category_files("06-ideas"))
+
+
+@app.route("/runbooks")
+def runbooks():
+    return render_template("listing.html", title="Runbooks", items=_category_files("11-runbooks"))
 
 
 @app.route("/inbox")

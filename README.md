@@ -39,6 +39,7 @@ python3 app.py
 - `/roadmap`
 - `/active-work`
 - `/daily-logs`
+- `/runbooks`
 - `/inbox`
 - `/inbox/new`
 - `/inbox/bugs`
