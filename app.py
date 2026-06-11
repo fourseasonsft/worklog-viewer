@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 from functools import wraps
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urljoin
 
@@ -23,6 +24,21 @@ CORE_SERVICE_OVERRIDE_PATHS = (
     Path("/etc/systemd/system/employees.service.d/override.conf"),
     Path("/etc/systemd/system/employees.service"),
 )
+ACTIVE_WORK_FILES = [
+    {"title": "Core", "path": "03-active-work/core.md"},
+    {"title": "Unity", "path": "03-active-work/unity.md"},
+    {"title": "IMS", "path": "03-active-work/ims.md"},
+    {"title": "Dispatch", "path": "03-active-work/dispatch.md"},
+    {"title": "Parking", "path": "03-active-work/parking.md"},
+    {"title": "CY Storage", "path": "03-active-work/cy-storage.md"},
+    {"title": "Worklog", "path": "03-active-work/worklog.md"},
+]
+TOP_DASHBOARD_FILES = [
+    {"title": "Current Focus", "path": "00-dashboard/current-focus.md", "anchor": "current-focus"},
+    {"title": "Next Actions", "path": "00-dashboard/next-actions.md", "anchor": "next-actions"},
+    {"title": "Where We Left Off", "path": "00-dashboard/where-we-left-off.md", "anchor": "where-we-left-off"},
+]
+INBOX_FOLDERS = ["new", "bugs", "features", "support"]
 
 
 app = Flask(__name__)
@@ -124,6 +140,188 @@ def _category_files(category: str) -> list[str]:
     if not root.exists():
         return []
     return [str(path.relative_to(WORKLOG_ROOT)) for path in sorted(root.rglob("*.md"))]
+
+
+def _relative_md_files(relative_dir: str) -> list[Path]:
+    root = WORKLOG_ROOT / relative_dir
+    if not root.exists():
+        return []
+    return [path for path in sorted(root.rglob("*.md")) if path.is_file()]
+
+
+def _file_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _format_file_timestamp(path: Path) -> str:
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%d")
+    except OSError:
+        return "Unknown"
+
+
+def _extract_section_text(markdown_text: str, heading: str) -> str:
+    heading = heading.strip().lower()
+    collecting = False
+    collected: list[str] = []
+    for line in markdown_text.splitlines():
+        heading_match = re.match(r"^##\s+(.+?)\s*$", line)
+        if heading_match:
+            current_heading = heading_match.group(1).strip().lower()
+            if collecting and current_heading != heading:
+                break
+            collecting = current_heading == heading
+            continue
+        if collecting:
+            collected.append(line)
+    return "\n".join(collected).strip()
+
+
+def _extract_first_value(section_text: str) -> str:
+    for raw_line in section_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        line = re.sub(r"^[-*]\s*", "", line).strip()
+        if line:
+            return line
+    return ""
+
+
+def _count_meaningful_bullets(section_text: str) -> int:
+    bullets = []
+    for raw_line in section_text.splitlines():
+        line = raw_line.strip()
+        if line.startswith("- "):
+            item = line[2:].strip()
+            if item:
+                bullets.append(item)
+    if not bullets:
+        return 0
+
+    meaningful = [
+        item
+        for item in bullets
+        if not re.match(r"^(none|no\b|none recorded\b|none at the moment\b|none currently\b|none at the application layer\b|none blocking\b)", item.lower())
+    ]
+    return len(meaningful)
+
+
+def _count_markdown_files(relative_dir: str) -> int:
+    return len(_relative_md_files(relative_dir))
+
+
+def _parse_key_value_metadata(markdown_text: str) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    for raw_line in markdown_text.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("- "):
+            continue
+        if ":" not in line:
+            continue
+        key, value = line[2:].split(":", 1)
+        key = key.strip().lower()
+        value = value.strip()
+        if key and value:
+            metadata[key] = value
+    return metadata
+
+
+def _summarize_active_work_file(relative_path: str, title: str) -> dict[str, object]:
+    source_path = WORKLOG_ROOT / relative_path
+    text = source_path.read_text(encoding="utf-8")
+    sprint_text = _extract_section_text(text, "Current Sprint / Focus")
+    blockers_text = _extract_section_text(text, "Blockers")
+    last_updated_text = _extract_section_text(text, "Last Updated")
+    last_updated = _extract_first_value(last_updated_text) or _format_file_timestamp(source_path)
+    return {
+        "title": title,
+        "path": relative_path,
+        "current_sprint_html": _render_markdown(sprint_text or "_No current sprint recorded._"),
+        "blockers_count": _count_meaningful_bullets(blockers_text),
+        "last_updated": last_updated,
+    }
+
+
+def _parse_inbox_item(path: Path) -> dict[str, object]:
+    text = path.read_text(encoding="utf-8")
+    metadata = _parse_key_value_metadata(text)
+    summary = (
+        metadata.get("summary")
+        or metadata.get("description")
+        or metadata.get("notes")
+        or metadata.get("title")
+        or path.stem.replace("-", " ").title()
+    )
+    detail_lines = []
+    for field in ("app", "priority", "status", "type", "next action"):
+        value = metadata.get(field)
+        if value:
+            detail_lines.append((field.title(), value))
+    excerpt = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("- "):
+            line = line[2:].strip()
+        if not line:
+            continue
+        excerpt.append(line)
+        if len(excerpt) >= 3:
+            break
+    return {
+        "title": summary,
+        "path": str(path.relative_to(WORKLOG_ROOT)),
+        "category": path.parent.name,
+        "metadata": detail_lines,
+        "excerpt_html": _render_markdown("\n\n".join(excerpt) if excerpt else "_No details recorded._"),
+        "mtime": _file_mtime(path),
+        "mtime_display": _format_file_timestamp(path),
+    }
+
+
+def _dashboard_counts() -> dict[str, int]:
+    active_work_count = len(ACTIVE_WORK_FILES)
+    blockers = _count_meaningful_bullets(_read_markdown("00-dashboard/blockers.md"))
+    for item in ACTIVE_WORK_FILES:
+        source_path = WORKLOG_ROOT / item["path"]
+        text = source_path.read_text(encoding="utf-8")
+        blockers += _count_meaningful_bullets(_extract_section_text(text, "Blockers"))
+    return {
+        "open_bugs": _count_markdown_files("04-inbox/bugs"),
+        "open_features": _count_markdown_files("04-inbox/features"),
+        "open_support": _count_markdown_files("04-inbox/support"),
+        "open_new": _count_markdown_files("04-inbox/new"),
+        "active_applications": active_work_count,
+        "blockers": blockers,
+    }
+
+
+def _recent_inbox_items(limit: int = 8) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    for folder in INBOX_FOLDERS:
+        for path in _relative_md_files(f"04-inbox/{folder}"):
+            items.append(_parse_inbox_item(path))
+    items.sort(key=lambda item: (item["mtime"], item["path"]), reverse=True)
+    return items[:limit]
+
+
+def _dashboard_documents() -> list[dict[str, object]]:
+    docs = []
+    for item in TOP_DASHBOARD_FILES:
+        source_path = WORKLOG_ROOT / item["path"]
+        source_text = source_path.read_text(encoding="utf-8")
+        docs.append(
+            {
+                **item,
+                "html": _render_markdown(source_text),
+            }
+        )
+    return docs
 
 
 def _pretty_title(path: str) -> str:
@@ -328,19 +526,51 @@ def inject_globals() -> dict[str, object]:
 @app.route("/")
 @_require_worklog_session
 def dashboard():
-    cards = [
-        {"title": "Current Focus", "path": "00-dashboard/current-focus.md"},
-        {"title": "Where We Left Off", "path": "00-dashboard/where-we-left-off.md"},
-        {"title": "Blockers", "path": "00-dashboard/blockers.md"},
-        {"title": "Next Actions", "path": "00-dashboard/next-actions.md"},
-        {"title": "Today’s Daily Log", "path": _latest_daily_log() or "01-daily-logs/2026/06/2026-06-11.md"},
-        {"title": "Inbox / New Items", "path": "04-inbox/new/example-inbox-item.md"},
+    top_documents = _dashboard_documents()
+    current_focus = top_documents[0]
+    next_actions = top_documents[1]
+    where_we_left_off = top_documents[2]
+    latest_daily_log_path = _latest_daily_log() or "01-daily-logs/2026/06/2026-06-11.md"
+    latest_daily_log = {
+        "title": "Today’s Daily Log",
+        "path": latest_daily_log_path,
+        "html": _render_markdown(_read_markdown(latest_daily_log_path)),
+    }
+
+    active_work = [_summarize_active_work_file(item["path"], item["title"]) for item in ACTIVE_WORK_FILES]
+    counts = _dashboard_counts()
+    inbox_items = _recent_inbox_items()
+    summary_cards = [
+        {"label": "Open Bugs", "count": counts["open_bugs"], "href": url_for("inbox_bugs"), "hint": "Current bug items"},
+        {"label": "Open Features", "count": counts["open_features"], "href": url_for("inbox_features"), "hint": "Requested enhancements"},
+        {"label": "Open Support Items", "count": counts["open_support"], "href": url_for("inbox_support"), "hint": "Support and operational issues"},
+        {"label": "Open New Inbox Items", "count": counts["open_new"], "href": url_for("inbox_new"), "hint": "Fresh triage queue"},
+        {"label": "Active Applications", "count": counts["active_applications"], "href": url_for("active_work"), "hint": "Tracked work streams"},
+        {"label": "Blockers", "count": counts["blockers"], "href": f"{url_for('dashboard')}#where-we-left-off", "hint": "Current blocking items"},
     ]
-    rendered = []
-    for card in cards:
-        source = _read_markdown(card["path"])
-        rendered.append({**card, "html": _render_markdown(source)})
-    return render_template("dashboard.html", cards=rendered)
+
+    quick_links = [
+        {"label": "Current Focus", "href": "#current-focus"},
+        {"label": "Next Actions", "href": "#next-actions"},
+        {"label": "Daily Logs", "href": url_for("daily_logs")},
+        {"label": "Roadmap", "href": url_for("roadmap")},
+        {"label": "Inbox", "href": url_for("inbox")},
+        {"label": "Runbooks", "href": url_for("runbooks")},
+        {"label": "Active Work", "href": url_for("active_work")},
+    ]
+
+    return render_template(
+        "dashboard.html",
+        counts=counts,
+        quick_links=quick_links,
+        summary_cards=summary_cards,
+        current_focus=current_focus,
+        next_actions=next_actions,
+        where_we_left_off=where_we_left_off,
+        latest_daily_log=latest_daily_log,
+        active_work=active_work,
+        inbox_items=inbox_items,
+    )
 
 
 @app.route("/roadmap")

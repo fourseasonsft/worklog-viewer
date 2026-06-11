@@ -17,6 +17,7 @@ Read-only Flask viewer for the FSFT worklog markdown repository.
   - `/opt/fsftdev/fsft-knowledge-base/07-worklog/worklog-viewer.md`
 - The viewer is read-only but contains internal project information and must be protected before broad external exposure
 - The long-term protection model is Core/Unity SSO, not a local Worklog login or separate identity system
+- The dashboard is a daily command center with summary cards, top-priority docs, app status summaries, and recent inbox items
 
 ## Content Root
 
@@ -77,6 +78,14 @@ sudo systemctl status worklog-dev.service --no-pager
 - `/logout`
 - `/view/<path:relative_path>`
 - `/health`
+
+## Dashboard Layout
+
+- Summary cards for open bugs, open features, open support items, open new inbox items, active applications, and blockers
+- Prominent `Current Focus`, `Next Actions`, and `Where We Left Off` sections
+- Daily log visibility for the current day
+- App status summary for Core, Unity, IMS, Dispatch, Parking, CY Storage, and Worklog
+- Inbox summary with the newest items first
 
 ## Systemd Example
 
