@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from functools import wraps
 from pathlib import Path
 from urllib.parse import quote, urljoin
@@ -18,6 +19,10 @@ DEFAULT_UNITY_BASE_URL = "https://unity.fsftdev.com"
 ASSERTION_VERSION = 1
 ASSERTION_TYPE = "core_application_assertion"
 ASSERTION_ISSUER = "four-seasons-core"
+CORE_SERVICE_OVERRIDE_PATHS = (
+    Path("/etc/systemd/system/employees.service.d/override.conf"),
+    Path("/etc/systemd/system/employees.service"),
+)
 
 
 app = Flask(__name__)
@@ -42,6 +47,32 @@ app.config["UNITY_BASE_URL"] = (
     os.environ.get("UNITY_BASE_URL", "").strip().rstrip("/")
     or DEFAULT_UNITY_BASE_URL
 )
+
+
+def _read_core_assertion_secret_from_system() -> str | None:
+    for path in CORE_SERVICE_OVERRIDE_PATHS:
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+
+        for line in text.splitlines():
+            if "CORE_ASSERTION_SECRET=" not in line:
+                continue
+            match = re.search(r"CORE_ASSERTION_SECRET=([^\s\"]+)", line)
+            if match:
+                candidate = match.group(1).strip()
+                if candidate:
+                    return candidate
+    return None
+
+
+if app.config["WORKLOG_ASSERTION_SECRET"] == "worklog-dev-assertion-secret":
+    system_secret = _read_core_assertion_secret_from_system()
+    if system_secret:
+        app.config["WORKLOG_ASSERTION_SECRET"] = system_secret
 
 
 def _resolve_worklog_path(relative_path: str) -> Path:
