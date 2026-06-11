@@ -70,6 +70,7 @@ def _pretty_title(path: str) -> str:
         "unity.md": "Unity",
         "core.md": "Core",
         "cy-storage.md": "CY Storage",
+        "worklog.md": "Worklog",
     }
     return mapping.get(Path(path).name, Path(path).stem.replace("-", " ").title())
 
@@ -142,6 +143,7 @@ def active_work():
         "03-active-work/unity.md",
         "03-active-work/core.md",
         "03-active-work/cy-storage.md",
+        "03-active-work/worklog.md",
     ]
     sections = [{"path": path, "title": _pretty_title(path), "html": _render_markdown(_read_markdown(path))} for path in files]
     return render_template("section.html", title="Active Work", sections=sections)

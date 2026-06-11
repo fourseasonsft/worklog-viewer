@@ -1,0 +1,8 @@
+tunnel: fs-dev-01
+credentials-file: /etc/cloudflared/fs-dev-01.json
+
+ingress:
+  - hostname: worklog.fsftdev.com
+    service: http://127.0.0.1:5075
+  - service: http_status:404
+

@@ -1,0 +1,17 @@
+[Unit]
+Description=FSFT Worklog Viewer Dev
+After=network.target
+
+[Service]
+User=david
+Group=www-data
+WorkingDirectory=/opt/fsftdev/worklog-viewer
+Environment="PATH=/opt/fsftdev/worklog-viewer/.venv/bin"
+Environment="WORKLOG_ROOT=/opt/fsftdev/fsft-worklog"
+ExecStart=/opt/fsftdev/worklog-viewer/.venv/bin/gunicorn --workers 2 --bind 127.0.0.1:5075 app:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
