@@ -13,6 +13,8 @@ Read-only Flask viewer for the FSFT worklog markdown repository.
   - `/opt/fsftdev/fsft-knowledge-base/07-worklog/worklog-overview.md`
   - `/opt/fsftdev/fsft-knowledge-base/07-worklog/worklog-daily-workflow.md`
   - `/opt/fsftdev/fsft-knowledge-base/07-worklog/worklog-viewer.md`
+- The viewer is read-only but contains internal project information and should be protected with Cloudflare Access before broad external exposure
+- Long-term external access should eventually move to Core/Unity SSO, not a local Worklog login
 
 ## Content Root
 
