@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="row justify-content-center">
+    <div class="col-12 col-lg-8 col-xl-6">
+      <div class="card card-shadow border-0">
+        <div class="card-body p-4 p-lg-5">
+          <div class="text-uppercase text-secondary small fw-semibold mb-2">Access Denied</div>
+          <h1 class="h3 mb-3">Worklog access is restricted</h1>
+          <p class="text-secondary mb-4">{{ reason }}</p>
+          <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-primary" href="{{ url_for('dashboard') }}">Retry Worklog</a>
+            <a class="btn btn-outline-secondary" href="{{ request.args.get('next') or 'https://unity.fsftdev.com/launcher' }}">Go to Unity</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

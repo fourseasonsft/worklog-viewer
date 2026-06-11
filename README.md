@@ -8,13 +8,15 @@ Read-only Flask viewer for the FSFT worklog markdown repository.
 - Worklog = what we did, what is next, bugs, features, support issues, and where we left off
 - Codex should update the Worklog after meaningful work
 - Codex should update the KB only when architecture, runbooks, infrastructure, auth, deployment, or business rules change
+- Worklog is protected by Core/Unity SSO and restricted to Super Admin users only
+- There is no local Worklog login, password store, or database
 - Use the KB for workflow and platform guidance:
   - `/opt/fsftdev/fsft-knowledge-base/07-worklog/index.md`
   - `/opt/fsftdev/fsft-knowledge-base/07-worklog/worklog-overview.md`
   - `/opt/fsftdev/fsft-knowledge-base/07-worklog/worklog-daily-workflow.md`
   - `/opt/fsftdev/fsft-knowledge-base/07-worklog/worklog-viewer.md`
-- The viewer is read-only but contains internal project information and should be protected with Cloudflare Access before broad external exposure
-- Long-term external access should eventually move to Core/Unity SSO, not a local Worklog login
+- The viewer is read-only but contains internal project information and must be protected before broad external exposure
+- The long-term protection model is Core/Unity SSO, not a local Worklog login or separate identity system
 
 ## Content Root
 
@@ -70,6 +72,9 @@ sudo systemctl status worklog-dev.service --no-pager
 - `/decisions`
 - `/release-notes`
 - `/ideas`
+- `/sso/launch`
+- `/sso/callback`
+- `/logout`
 - `/view/<path:relative_path>`
 - `/health`
 
