@@ -34,6 +34,8 @@ ACTIVE_WORK_FILES = [
     {"title": "Worklog", "path": "03-active-work/worklog.md"},
 ]
 TOP_DASHBOARD_FILES = [
+    {"title": "Portfolio Status", "path": "00-dashboard/portfolio-status.md", "anchor": "portfolio-status"},
+    {"title": "Engineering Priorities", "path": "00-dashboard/engineering-priorities.md", "anchor": "engineering-priorities"},
     {"title": "Current Focus", "path": "00-dashboard/current-focus.md", "anchor": "current-focus"},
     {"title": "Next Actions", "path": "00-dashboard/next-actions.md", "anchor": "next-actions"},
     {"title": "Where We Left Off", "path": "00-dashboard/where-we-left-off.md", "anchor": "where-we-left-off"},
@@ -119,6 +121,8 @@ def _latest_daily_log() -> str | None:
 def _nav_items() -> list[dict[str, str]]:
     return [
         {"label": "Dashboard", "endpoint": "dashboard"},
+        {"label": "Portfolio Status", "endpoint": "view_file", "args": {"relative_path": "00-dashboard/portfolio-status.md"}},
+        {"label": "Engineering Priorities", "endpoint": "view_file", "args": {"relative_path": "00-dashboard/engineering-priorities.md"}},
         {"label": "Roadmap", "endpoint": "roadmap"},
         {"label": "Active Work", "endpoint": "active_work"},
         {"label": "Daily Logs", "endpoint": "daily_logs"},
@@ -527,9 +531,11 @@ def inject_globals() -> dict[str, object]:
 @_require_worklog_session
 def dashboard():
     top_documents = _dashboard_documents()
-    current_focus = top_documents[0]
-    next_actions = top_documents[1]
-    where_we_left_off = top_documents[2]
+    portfolio_status = top_documents[0]
+    engineering_priorities = top_documents[1]
+    current_focus = top_documents[2]
+    next_actions = top_documents[3]
+    where_we_left_off = top_documents[4]
     latest_daily_log_path = _latest_daily_log() or "01-daily-logs/2026/06/2026-06-11.md"
     latest_daily_log = {
         "title": "Today’s Daily Log",
@@ -550,6 +556,8 @@ def dashboard():
     ]
 
     quick_links = [
+        {"label": "Portfolio Status", "href": "#portfolio-status"},
+        {"label": "Engineering Priorities", "href": "#engineering-priorities"},
         {"label": "Current Focus", "href": "#current-focus"},
         {"label": "Next Actions", "href": "#next-actions"},
         {"label": "Daily Logs", "href": url_for("daily_logs")},
@@ -564,6 +572,8 @@ def dashboard():
         counts=counts,
         quick_links=quick_links,
         summary_cards=summary_cards,
+        portfolio_status=portfolio_status,
+        engineering_priorities=engineering_priorities,
         current_focus=current_focus,
         next_actions=next_actions,
         where_we_left_off=where_we_left_off,

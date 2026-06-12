@@ -41,7 +41,8 @@
           <nav class="nav flex-column gap-1">
             {% for item in nav_items %}
               {% set view_args = request.view_args or {} %}
-              <a class="px-2 py-1 rounded {% if request.endpoint == item.endpoint and (not item.category or view_args.get('category') == item.category) %}active bg-dark{% endif %}" href="{% if item.endpoint == 'category_view' %}{{ url_for(item.endpoint, category=item.category) }}{% else %}{{ url_for(item.endpoint) }}{% endif %}">{{ item.label }}</a>
+              {% set item_args = item.get('args', {}) %}
+              <a class="px-2 py-1 rounded {% if request.endpoint == item.endpoint and (not item.category or view_args.get('category') == item.category) and (not item_args or item_args == view_args) %}active bg-dark{% endif %}" href="{% if item.endpoint == 'category_view' %}{{ url_for(item.endpoint, category=item.category) }}{% elif item_args %}{{ url_for(item.endpoint, **item_args) }}{% else %}{{ url_for(item.endpoint) }}{% endif %}">{{ item.label }}</a>
             {% endfor %}
           </nav>
         </aside>

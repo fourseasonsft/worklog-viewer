@@ -19,22 +19,28 @@
   </div>
 
   <div class="row g-3 mb-4">
-    {% for card in summary_cards %}
-      <div class="col-12 col-md-6 col-xl-4">
-        <a class="d-block text-decoration-none text-dark" href="{{ card.href }}">
-          <div class="card card-shadow h-100 summary-card">
-            <div class="card-body">
-              <div class="text-secondary small fw-semibold text-uppercase">{{ card.label }}</div>
-              <div class="display-6 fw-semibold mb-1">{{ card.count }}</div>
-              <div class="text-secondary small">{{ card.hint }}</div>
-            </div>
-          </div>
-        </a>
+    <div class="col-12" id="portfolio-status">
+      <div class="card card-shadow h-100 border-0 section-card section-card-focus">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+          <div class="fw-semibold">{{ portfolio_status.title }}</div>
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('view_file', relative_path=portfolio_status.path) }}">Open source</a>
+        </div>
+        <div class="card-body doc-body">
+          {{ portfolio_status.html | safe }}
+        </div>
       </div>
-    {% endfor %}
-  </div>
-
-  <div class="row g-3 mb-4">
+    </div>
+    <div class="col-12" id="engineering-priorities">
+      <div class="card card-shadow h-100 border-0 section-card section-card-focus">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+          <div class="fw-semibold">{{ engineering_priorities.title }}</div>
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('view_file', relative_path=engineering_priorities.path) }}">Open source</a>
+        </div>
+        <div class="card-body doc-body">
+          {{ engineering_priorities.html | safe }}
+        </div>
+      </div>
+    </div>
     <div class="col-12" id="current-focus">
       <div class="card card-shadow h-100 border-0 section-card section-card-focus">
         <div class="card-header bg-white d-flex justify-content-between align-items-center">
@@ -68,6 +74,22 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    {% for card in summary_cards %}
+      <div class="col-12 col-md-6 col-xl-4">
+        <a class="d-block text-decoration-none text-dark" href="{{ card.href }}">
+          <div class="card card-shadow h-100 summary-card">
+            <div class="card-body">
+              <div class="text-secondary small fw-semibold text-uppercase">{{ card.label }}</div>
+              <div class="display-6 fw-semibold mb-1">{{ card.count }}</div>
+              <div class="text-secondary small">{{ card.hint }}</div>
+            </div>
+          </div>
+        </a>
+      </div>
+    {% endfor %}
   </div>
 
   <div class="row g-3 mb-4">
