@@ -452,6 +452,76 @@ def _dashboard_documents() -> list[dict[str, object]]:
     return docs
 
 
+def _first_nonempty_paragraph(markdown_text: str) -> str:
+    paragraphs = [part.strip() for part in markdown_text.split("\n\n") if part.strip()]
+    for paragraph in paragraphs:
+        if paragraph.startswith("#"):
+            continue
+        cleaned = re.sub(r"^[-*]\s*", "", paragraph).strip()
+        if cleaned:
+            return cleaned
+    return ""
+
+
+def _focus_summary() -> dict[str, str]:
+    current_focus = _read_markdown("00-dashboard/current-focus.md")
+    engineering = _read_markdown("00-dashboard/engineering-priorities.md")
+    next_actions = _read_markdown("00-dashboard/next-actions.md")
+    first_priority_line = ""
+    for line in engineering.splitlines():
+        if line.startswith("| P1 |"):
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            if len(cells) >= 6:
+                first_priority_line = f"{cells[1]}: {cells[2]}"
+            break
+    return {
+        "greeting": "Good to see you, David.",
+        "date": datetime.now(timezone.utc).strftime("%A, %B %-d, %Y"),
+        "focus": _first_nonempty_paragraph(current_focus) or "Keep the Worklog current and the day easy to resume.",
+        "summary": _first_nonempty_paragraph(current_focus) or "The Worklog should make the next decision obvious.",
+        "top_priority": first_priority_line or "Keep the current top priority moving first.",
+        "today_actions": _extract_section_text(next_actions, "Next Actions"),
+    }
+
+
+def _today_focus_items(limit: int = 3) -> list[dict[str, str]]:
+    items = []
+    next_actions_text = _extract_section_text(_read_markdown("00-dashboard/next-actions.md"), "Next Actions")
+    for line in next_actions_text.splitlines():
+        line = line.strip()
+        if line.startswith("- "):
+            item = line[2:].strip()
+            if item:
+                items.append({"text": item, "kind": "next action"})
+    if len(items) < limit:
+        for line in _extract_section_text(_read_markdown("00-dashboard/blockers.md"), "Blockers").splitlines():
+            line = line.strip()
+            if line.startswith("- "):
+                item = line[2:].strip()
+                if item:
+                    items.append({"text": item, "kind": "blocker"})
+    return items[:limit]
+
+
+def _today_blockers(limit: int = 3) -> list[str]:
+    blockers = []
+    for line in _extract_section_text(_read_markdown("00-dashboard/blockers.md"), "Blockers").splitlines():
+        line = line.strip()
+        if line.startswith("- "):
+            item = line[2:].strip()
+            if item:
+                blockers.append(item)
+    return blockers[:limit]
+
+
+def _triage_items(limit: int = 8) -> list[dict[str, str]]:
+    items = []
+    for item in _all_structured_inbox_items():
+        if item.get("category") == "new":
+            items.append(item)
+    return items[:limit]
+
+
 def _pretty_title(path: str) -> str:
     mapping = {
         "ims.md": "IMS",
@@ -671,38 +741,37 @@ def dashboard():
     counts = _dashboard_counts()
     inbox_items = _recent_inbox_items()
     intake_counts = _dashboard_intake_counts()
-    intake_items = _all_structured_inbox_items()[:8]
+    intake_items = _triage_items()
     plain_mode = _intake_plain_mode_enabled()
-    summary_cards = [
-        {"label": "Open Bugs", "count": counts["open_bugs"], "href": url_for("inbox_bugs"), "hint": "Current bug items"},
-        {"label": "Open Features", "count": counts["open_features"], "href": url_for("inbox_features"), "hint": "Requested enhancements"},
-        {"label": "Open Support Items", "count": counts["open_support"], "href": url_for("inbox_support"), "hint": "Support and operational issues"},
-        {"label": "Open New Inbox Items", "count": counts["open_new"], "href": url_for("inbox_new"), "hint": "Fresh triage queue"},
-        {"label": "Active Applications", "count": counts["active_applications"], "href": url_for("active_work"), "hint": "Tracked work streams"},
-        {"label": "Blockers", "count": counts["blockers"], "href": f"{url_for('dashboard')}#where-we-left-off", "hint": "Current blocking items"},
-    ]
-
-    quick_links = [
-        {"label": "Portfolio Status", "href": "#portfolio-status"},
-        {"label": "Engineering Priorities", "href": "#engineering-priorities"},
-        {"label": "Current Focus", "href": "#current-focus"},
-        {"label": "Next Actions", "href": "#next-actions"},
-        {"label": "Daily Logs", "href": url_for("daily_logs")},
-        {"label": "Roadmap", "href": url_for("roadmap")},
-        {"label": "Inbox", "href": url_for("inbox")},
-        {"label": "Runbooks", "href": url_for("runbooks")},
-        {"label": "Active Work", "href": url_for("active_work")},
-        {"label": "Intake", "href": url_for("intake")},
+    focus = _focus_summary()
+    today_focus = _today_focus_items()
+    blockers = _today_blockers()
+    triage_counts = {
+        "new": counts["open_new"],
+        "bugs": counts["open_bugs"],
+        "features": counts["open_features"],
+        "support": counts["open_support"],
+    }
+    secondary_nav = [
+        {"label": "Dashboard", "href": "#top"},
+        {"label": "Capture", "href": "#capture"},
+        {"label": "Today", "href": "#today"},
+        {"label": "Inbox", "href": "#triage"},
+        {"label": "Apps", "href": "#apps"},
+        {"label": "Archive", "href": url_for("inbox_closed")},
     ]
 
     return render_template(
         "dashboard.html",
         counts=counts,
+        focus=focus,
+        today_focus=today_focus,
+        blockers=blockers,
+        triage_counts=triage_counts,
         intake_counts=intake_counts,
         intake_items=intake_items,
         plain_mode=plain_mode,
-        quick_links=quick_links,
-        summary_cards=summary_cards,
+        secondary_nav=secondary_nav,
         portfolio_status=portfolio_status,
         engineering_priorities=engineering_priorities,
         current_focus=current_focus,
