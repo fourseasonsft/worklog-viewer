@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="assistant-shell">
+  <section class="hero-card card card-shadow border-0 mb-4">
+    <div class="card-body p-4 p-xl-5 d-flex flex-column flex-lg-row justify-content-between gap-3">
+      <div>
+        <div class="eyebrow text-uppercase text-secondary small fw-semibold mb-2">Worklog Assistant</div>
+        <h1 class="h2 mb-2">Chat with your Worklog memory</h1>
+        <p class="text-secondary mb-0">Limited to FSFT Worklog and KB context. Capture first. Classify later. Digest before acting.</p>
+      </div>
+      <div class="text-lg-end">
+        <div class="badge {% if openai_enabled %}text-bg-success{% else %}text-bg-warning{% endif %} mb-2">
+          {% if openai_enabled %}OpenAI ready{% else %}OpenAI not configured{% endif %}
+        </div>
+        <div class="d-flex flex-wrap gap-2 justify-content-lg-end">
+          <a class="btn btn-outline-primary btn-sm" href="{{ url_for('dashboard') }}">Back to dashboard</a>
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('assistant', digest_preview=1) }}">Digest preview</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="row g-4">
+    <div class="col-12 col-xl-7">
+      <div class="card card-shadow border-0 h-100">
+        <div class="card-body p-4 p-xl-5">
+          <div class="text-secondary small fw-semibold text-uppercase mb-3">Conversation</div>
+          <div class="assistant-panel mb-4">
+            {% if conversation %}
+              {% for item in conversation %}
+                <div class="chat-turn user-turn">
+                  <div class="chat-label">David</div>
+                  <div class="chat-bubble">{{ item.raw_text or item.raw or item.raw_text }}</div>
+                </div>
+              {% endfor %}
+            {% else %}
+              <div class="text-secondary">No thoughts yet. Type one below.</div>
+            {% endif %}
+          </div>
+
+          <form id="assistant-form" class="assistant-form">
+            <textarea class="form-control assistant-input mb-3" rows="6" name="message" placeholder="hey for IMS we need to do x, y, z"></textarea>
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+              <button class="btn btn-primary btn-lg" type="submit">Send</button>
+              <button class="btn btn-outline-secondary btn-lg" type="button" id="digest-button">Digest my thought box</button>
+              <div class="text-secondary small">Every message is stored as raw thought first.</div>
+            </div>
+          </form>
+          <div id="assistant-status" class="mt-3 text-secondary small"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-xl-5">
+      <div class="card card-shadow border-0 h-100">
+        <div class="card-body p-4 p-xl-5">
+          <div class="text-secondary small fw-semibold text-uppercase mb-3">Digest preview</div>
+          {% if digest_preview %}
+            <div class="mb-3"><strong>Plain-English summary:</strong> {{ digest_preview.plain_summary }}</div>
+            <div class="mb-3"><strong>Grouped by app:</strong> {{ digest_preview.grouped_by_app }}</div>
+            <div class="mb-3"><strong>Likely bugs:</strong> {{ digest_preview.likely_bugs }}</div>
+            <div class="mb-3"><strong>Likely features:</strong> {{ digest_preview.likely_features }}</div>
+            <div class="mb-3"><strong>Likely blockers:</strong> {{ digest_preview.likely_blockers }}</div>
+            <div class="mb-3"><strong>Recommended Worklog items:</strong> {{ digest_preview.recommended_worklog_items }}</div>
+            <div class="mb-3"><strong>Recommended Codex prompt:</strong><pre class="assistant-pre">{{ digest_preview.recommended_codex_prompt }}</pre></div>
+          {% else %}
+            <div class="text-secondary">Ask for a digest preview after capturing raw thoughts.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  const form = document.getElementById('assistant-form');
+  const button = document.getElementById('digest-button');
+  const status = document.getElementById('assistant-status');
+  const input = form.querySelector('textarea[name="message"]');
+  async function sendMessage(message) {
+    status.textContent = 'Thinking...';
+    const res = await fetch('{{ url_for("assistant_message") }}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message}),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      status.textContent = data.error || 'Something went wrong.';
+      return;
+    }
+    status.textContent = data.assistant_reply || 'Saved.';
+    window.setTimeout(() => window.location.reload(), 300);
+  }
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    sendMessage(input.value);
+  });
+  button.addEventListener('click', () => sendMessage('digest my thought box'));
+})();
+</script>
+{% endblock %}

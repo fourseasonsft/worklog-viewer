@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import os
 import re
+import json
+import urllib.error
+import urllib.request
+from collections import Counter
 from functools import wraps
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,6 +45,7 @@ TOP_DASHBOARD_FILES = [
     {"title": "Where We Left Off", "path": "00-dashboard/where-we-left-off.md", "anchor": "where-we-left-off"},
 ]
 INBOX_FOLDERS = ["new", "bugs", "features", "support"]
+THOUGHT_BOX_DIR = WORKLOG_ROOT / "04-inbox/thought-box"
 INTAKE_TYPE_BUCKETS = {
     "bug": "bugs",
     "feature": "features",
@@ -74,6 +79,7 @@ app.config["UNITY_BASE_URL"] = (
     os.environ.get("UNITY_BASE_URL", "").strip().rstrip("/")
     or DEFAULT_UNITY_BASE_URL
 )
+app.config["OPENAI_API_KEY"] = os.environ.get("OPENAI_API_KEY", "").strip()
 
 
 def _read_core_assertion_secret_from_system() -> str | None:
@@ -130,6 +136,7 @@ def _latest_daily_log() -> str | None:
 def _nav_items() -> list[dict[str, str]]:
     return [
         {"label": "Dashboard", "endpoint": "dashboard"},
+        {"label": "Assistant", "endpoint": "assistant"},
         {"label": "Portfolio Status", "endpoint": "view_file", "args": {"relative_path": "00-dashboard/portfolio-status.md"}},
         {"label": "Engineering Priorities", "endpoint": "view_file", "args": {"relative_path": "00-dashboard/engineering-priorities.md"}},
         {"label": "Roadmap", "endpoint": "roadmap"},
@@ -436,6 +443,253 @@ def _create_inbox_item_from_form(form: dict[str, str]) -> Path:
 
 def _intake_plain_mode_enabled() -> bool:
     return request.args.get("plain", "").strip() == "1"
+
+
+def _ensure_thought_box_dir() -> None:
+    THOUGHT_BOX_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _slugify_title(value: str) -> str:
+    value = value.lower()
+    value = re.sub(r"[^a-z0-9]+", "-", value)
+    return re.sub(r"-+", "-", value).strip("-") or "thought"
+
+
+def _thought_path_prefix() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d-%H%M%S")
+
+
+def _parse_thought_file(path: Path) -> dict[str, str]:
+    text = path.read_text(encoding="utf-8")
+    data: dict[str, str] = {"path": str(path.relative_to(WORKLOG_ROOT))}
+    current = None
+    for line in text.splitlines():
+        if line.startswith("- "):
+            if ":" in line[2:]:
+                key, value = line[2:].split(":", 1)
+                data[key.strip().lower().replace(" ", "_")] = value.strip()
+        elif line.startswith("## "):
+            current = line[3:].strip().lower().replace(" ", "_")
+            data.setdefault(current, "")
+        elif current and line.strip():
+            data[current] = (data.get(current, "") + "\n" + line).strip()
+    data["title"] = data.get("title") or path.stem.replace("-", " ").title()
+    data["raw_text"] = data.get("raw_text") or data.get("raw") or ""
+    return data
+
+
+def _thought_box_items(digested_only: bool | None = None) -> list[dict[str, str]]:
+    _ensure_thought_box_dir()
+    items: list[dict[str, str]] = []
+    for path in sorted(THOUGHT_BOX_DIR.glob("*.md"), reverse=True):
+        item = _parse_thought_file(path)
+        if digested_only is True and item.get("digest_status") == "not_digested":
+            continue
+        if digested_only is False and item.get("digest_status") != "not_digested":
+            continue
+        items.append(item)
+    return items
+
+
+def _write_thought_file(raw_text: str) -> Path:
+    _ensure_thought_box_dir()
+    prefix = _thought_path_prefix()
+    slug = _slugify_title(raw_text[:48])
+    path = THOUGHT_BOX_DIR / f"{prefix}-{slug}.md"
+    title = raw_text.strip().splitlines()[0][:80] if raw_text.strip() else "Thought"
+    inferred = _infer_thought(raw_text)
+    content = "\n".join(
+        [
+            f"# {title}",
+            "",
+            f"- created_at: {datetime.now(timezone.utc).isoformat()}",
+            "- source: David",
+            "- status: raw",
+            "- digest_status: not_digested",
+            f"- raw_text: {raw_text.strip()}",
+            f"- ai_inferred_app: {inferred['ai_inferred_app']}",
+            f"- ai_inferred_type: {inferred['ai_inferred_type']}",
+            f"- ai_summary: {inferred['ai_summary']}",
+            "",
+            "## Raw Thought",
+            raw_text.strip() or "TBD",
+            "",
+        ]
+    )
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def _kb_reference_text() -> str:
+    sections = []
+    for path in [
+        WORKLOG_ROOT / "00-dashboard/current-focus.md",
+        WORKLOG_ROOT / "00-dashboard/next-actions.md",
+        WORKLOG_ROOT / "00-dashboard/where-we-left-off.md",
+        WORKLOG_ROOT / "03-active-work/worklog.md",
+        WORKLOG_ROOT / "03-active-work/ims.md",
+        WORKLOG_ROOT / "03-active-work/dispatch.md",
+        WORKLOG_ROOT / "03-active-work/cy-storage.md",
+        Path("/opt/fsftdev/fsft-knowledge-base/07-worklog/index.md"),
+        Path("/opt/fsftdev/fsft-knowledge-base/07-worklog/worklog-overview.md"),
+        Path("/opt/fsftdev/fsft-knowledge-base/07-worklog/worklog-viewer.md"),
+        Path("/opt/fsftdev/fsft-knowledge-base/03-ims/index.md"),
+        Path("/opt/fsftdev/fsft-knowledge-base/05-dispatch/index.md"),
+        Path("/opt/fsftdev/fsft-knowledge-base/04-cy-storage/index.md"),
+        Path("/opt/fsftdev/fsft-knowledge-base/01-core/index.md"),
+        Path("/opt/fsftdev/fsft-knowledge-base/02-unity/index.md"),
+        Path("/opt/fsftdev/fsft-knowledge-base/20-xalan/index.md"),
+    ]:
+        if path.exists():
+            try:
+                sections.append(f"## {path.name}\n\n{path.read_text(encoding='utf-8')[:4000]}")
+            except OSError:
+                continue
+    return "\n\n".join(sections)
+
+
+def _openai_available() -> bool:
+    return bool(app.config.get("OPENAI_API_KEY"))
+
+
+def _safe_openai_error() -> str:
+    return "OpenAI is not configured. Set OPENAI_API_KEY in the environment to enable assistant digestion."
+
+
+def _call_openai_digest(items: list[dict[str, str]]) -> dict[str, object] | None:
+    api_key = app.config.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return None
+
+    prompt = "\n".join(
+        [
+            "You are the FSFT Worklog Assistant.",
+            "Use only the provided Worklog and KB context.",
+            "Summarize the raw thoughts and propose Worklog inbox items plus a Codex prompt.",
+            "Return JSON with keys plain_summary, grouped_by_app, likely_bugs, likely_features, likely_blockers, recommended_worklog_items, recommended_codex_prompt.",
+            "Do not recommend moving or deleting files in preview mode.",
+        ]
+    )
+    payload = {
+        "model": os.environ.get("OPENAI_MODEL", "gpt-5.1"),
+        "input": [
+            {"role": "system", "content": [{"type": "text", "text": prompt}]},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            {
+                                "thoughts": items,
+                                "reference_material": _kb_reference_text()[:12000],
+                            },
+                            ensure_ascii=False,
+                        ),
+                    }
+                ],
+            },
+        ],
+        "text": {"format": {"type": "json_object"}},
+    }
+    request_obj = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request_obj, timeout=30) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+
+    output_text = ""
+    for part in data.get("output", []):
+        for content in part.get("content", []):
+            if content.get("type") == "output_text":
+                output_text += content.get("text", "")
+    if not output_text:
+        return None
+    try:
+        parsed = json.loads(output_text)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _infer_thought(raw_text: str) -> dict[str, str]:
+    text = raw_text.lower()
+    app_guess = ""
+    for candidate in ["ims", "dispatch", "cy storage", "core", "unity", "parking", "hiring", "worklog"]:
+        if candidate in text:
+            app_guess = candidate.title() if candidate != "cy storage" else "CY Storage"
+            break
+    type_guess = ""
+    if any(word in text for word in ["bug", "broken", "error", "fail", "issue"]):
+        type_guess = "bug"
+    elif any(word in text for word in ["block", "blocked", "can't", "cannot", "need"]):
+        type_guess = "blocker"
+    elif any(word in text for word in ["support", "help", "question"]):
+        type_guess = "support"
+    elif any(word in text for word in ["feature", "request", "add", "should", "would like"]):
+        type_guess = "feature"
+    else:
+        type_guess = "thought"
+    return {
+        "ai_inferred_app": app_guess,
+        "ai_inferred_type": type_guess,
+        "ai_summary": raw_text.strip()[:220],
+    }
+
+
+def _digest_preview(items: list[dict[str, str]]) -> dict[str, object]:
+    openai_preview = _call_openai_digest(items)
+    if openai_preview:
+        openai_preview["kb_context_excerpt"] = _kb_reference_text()[:6000]
+        return openai_preview
+    buckets = Counter()
+    grouped: dict[str, list[str]] = {}
+    likely_bugs: list[str] = []
+    likely_features: list[str] = []
+    likely_blockers: list[str] = []
+    for item in items:
+        raw = item.get("raw_text", "")
+        inferred = _infer_thought(raw)
+        app_name = inferred["ai_inferred_app"] or "Unclear"
+        grouped.setdefault(app_name, []).append(raw)
+        buckets[app_name] += 1
+        if inferred["ai_inferred_type"] == "bug":
+            likely_bugs.append(raw)
+        elif inferred["ai_inferred_type"] == "feature":
+            likely_features.append(raw)
+        elif inferred["ai_inferred_type"] == "blocker":
+            likely_blockers.append(raw)
+    prompt = "\n".join(
+        [
+            "You are the FSFT Worklog Assistant.",
+            "Use Worklog and KB context only.",
+            "Convert the thoughts into concrete Worklog inbox suggestions and a Codex prompt.",
+            "Do not move files in preview mode.",
+        ]
+    )
+    return {
+        "plain_summary": f"{len(items)} undigested thought item(s) ready for review.",
+        "grouped_by_app": dict(buckets),
+        "likely_bugs": likely_bugs[:5],
+        "likely_features": likely_features[:5],
+        "likely_blockers": likely_blockers[:5],
+        "recommended_worklog_items": [
+            *(f"Bug: {text[:140]}" for text in likely_bugs[:3]),
+            *(f"Feature: {text[:140]}" for text in likely_features[:3]),
+            *(f"Blocker: {text[:140]}" for text in likely_blockers[:3]),
+        ],
+        "recommended_codex_prompt": prompt,
+        "kb_context_excerpt": _kb_reference_text()[:6000],
+    }
 
 
 def _dashboard_documents() -> list[dict[str, object]]:
@@ -906,6 +1160,48 @@ def intake():
         intake_items=intake_items,
         plain_mode=plain_mode,
     )
+
+
+@app.route("/assistant")
+@_require_worklog_session
+def assistant():
+    conversation = _thought_box_items()[:12]
+    digest_preview = None
+    if request.args.get("digest_preview") == "1":
+        digest_preview = _digest_preview(_thought_box_items(digested_only=False))
+    return render_template(
+        "assistant.html",
+        conversation=conversation,
+        digest_preview=digest_preview,
+        openai_enabled=_openai_available(),
+    )
+
+
+@app.route("/api/assistant/message", methods=["POST"])
+@_require_worklog_session
+def assistant_message():
+    payload = request.get_json(silent=True) or {}
+    message = (payload.get("message") or "").strip()
+    if not message:
+        return {"error": "message is required"}, 400
+    thought_path = _write_thought_file(message)
+    inferred = _infer_thought(message)
+    data = {
+        "ok": True,
+        "thought_path": str(thought_path.relative_to(WORKLOG_ROOT)),
+        "assistant_reply": "Saved your thought. I can digest it when you ask.",
+        "digest_status": "not_digested",
+        **inferred,
+    }
+    if "digest my thought box" in message.lower():
+        preview = _digest_preview(_thought_box_items(digested_only=False))
+        data["digest_preview"] = preview
+        data["assistant_reply"] = "I saved that thought and prepared a digest preview. No files were moved."
+    elif _openai_available():
+        data["assistant_reply"] = "I saved that thought. OpenAI-backed digestion is available, but the assistant stays scoped to Worklog and KB context."
+    else:
+        data["assistant_reply"] = _safe_openai_error()
+    return data
 
 
 @app.route("/view/<path:relative_path>")
