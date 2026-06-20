@@ -6,15 +6,15 @@
       <div class="d-flex flex-column flex-xl-row justify-content-between gap-4 align-items-xl-start">
         <div class="hero-copy">
           <div class="eyebrow text-uppercase text-secondary small fw-semibold mb-2">FSFT Worklog Command Center</div>
-          <div class="text-secondary small fw-semibold text-uppercase mb-2">What needs my attention right now?</div>
+          <div class="text-secondary small fw-semibold text-uppercase mb-2">What needs attention now?</div>
           <h1 class="display-6 fw-semibold mb-3">{{ focus.greeting }}</h1>
           <div class="focus-statement mb-3">{{ focus.focus }}</div>
           <p class="lead text-secondary mb-0">{{ focus.summary }}</p>
-          <div class="text-secondary small mt-3">What we should work on first: {{ focus.top_priority }}</div>
+          <div class="text-secondary small mt-3">Top next move: {{ focus.top_priority }}</div>
         </div>
         <div class="hero-meta text-xl-end">
           <div class="date-chip mb-2">{{ focus.date }}</div>
-          <div class="text-secondary small">Markdown-backed worklog. Clearer surface. Same source of truth.</div>
+          <div class="text-secondary small">Markdown-backed worklog. One idea logistics flow. Same source of truth.</div>
           <div class="mt-4 d-flex flex-wrap gap-2 justify-content-xl-end">
             {% for link in secondary_nav %}
               <a class="btn btn-outline-primary btn-sm" href="{{ link.href }}">{{ link.label }}</a>
@@ -40,14 +40,14 @@
     <div class="col-12 col-xl-7" id="capture">
       <section class="card card-shadow border-0 capture-card">
         <div class="card-body p-4 p-xl-5">
-          <div class="section-label text-uppercase text-secondary small fw-semibold mb-2">Capture first</div>
-          <div class="d-flex flex-column flex-md-row justify-content-between gap-3 align-items-md-start mb-3">
-            <div>
-              <h2 class="h3 mb-2">Quick Capture</h2>
-              <p class="text-secondary mb-0">Drop in a thought, blocker, bug, or feature and send it straight to the markdown inbox.</p>
-            </div>
-            <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('intake') }}">Open capture page</a>
-          </div>
+      <div class="section-label text-uppercase text-secondary small fw-semibold mb-2">Capture ideas</div>
+      <div class="d-flex flex-column flex-md-row justify-content-between gap-3 align-items-md-start mb-3">
+        <div>
+          <h2 class="h3 mb-2">Quick shortcut to Idea Inventory</h2>
+          <p class="text-secondary mb-0">Use this for fast thoughts. Use Idea Inventory for the full capture and grouping flow.</p>
+        </div>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('assistant') }}">Open Idea Inventory</a>
+      </div>
           <form class="quick-capture-form" method="post" action="{{ url_for('intake') }}">
             <textarea name="plain_english_summary" class="form-control capture-box" rows="6" placeholder="Write what needs attention right now..." autofocus></textarea>
             <div class="row g-3 mt-2">
@@ -89,10 +89,10 @@
     <div class="col-12 col-xl-5" id="today">
       <section class="card card-shadow border-0 h-100">
         <div class="card-body p-4 p-xl-5">
-          <div class="section-label text-uppercase text-secondary small fw-semibold mb-2">Focus second</div>
-          <h2 class="h3 mb-3">Today’s Focus</h2>
+          <div class="section-label text-uppercase text-secondary small fw-semibold mb-2">Decision surface</div>
+          <h2 class="h3 mb-3">Today’s attention</h2>
           <div class="priority-card mb-4">
-            <div class="text-secondary small fw-semibold text-uppercase mb-1">Top engineering priority</div>
+            <div class="text-secondary small fw-semibold text-uppercase mb-1">Top next action</div>
             <div class="fw-semibold">{{ focus.top_priority }}</div>
           </div>
           <div class="mb-4">
@@ -128,11 +128,11 @@
 
   <section class="card card-shadow border-0 mb-4" id="triage">
     <div class="card-body p-4 p-xl-5">
-      <div class="section-label text-uppercase text-secondary small fw-semibold mb-2">Triage third</div>
+      <div class="section-label text-uppercase text-secondary small fw-semibold mb-2">Updates</div>
       <div class="d-flex flex-column flex-md-row justify-content-between gap-3 align-items-md-end mb-3">
         <div>
-          <h2 class="h3 mb-2">Things waiting for a decision</h2>
-          <p class="text-secondary mb-0">New intake items stay grouped by urgency so the next move is obvious.</p>
+          <h2 class="h3 mb-2">Active, proposed, and shipped updates</h2>
+          <p class="text-secondary mb-0">A simple snapshot of idea flow across the Worklog.</p>
         </div>
         <div class="d-flex flex-wrap gap-2">
           <span class="badge text-bg-danger">New: {{ triage_counts.new }}</span>
@@ -157,9 +157,6 @@
                 <div class="mb-3 text-secondary small">{{ item.summary }}</div>
                 <div class="d-flex flex-wrap gap-2">
                   <a class="btn btn-outline-primary btn-sm" href="{{ url_for('view_file', relative_path=item.path) }}">View</a>
-                  <button class="btn btn-outline-secondary btn-sm" type="button" disabled>Promote</button>
-                  <button class="btn btn-outline-secondary btn-sm" type="button" disabled>Archive</button>
-                  <button class="btn btn-outline-secondary btn-sm" type="button" disabled>Mark reviewed</button>
                 </div>
               </div>
             </div>
@@ -168,9 +165,8 @@
       </div>
 
       <div class="d-flex flex-wrap gap-2">
-        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('inbox_new') }}">Open new items</a>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('assistant') }}">Open Idea Inventory</a>
         <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('inbox') }}">Open inbox</a>
-        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('inbox_closed') }}">Archive</a>
       </div>
     </div>
   </section>
@@ -179,8 +175,8 @@
     <div class="col-12 col-xl-6">
       <div class="card card-shadow border-0 h-100">
         <div class="card-body p-4">
-          <div class="section-label text-uppercase text-secondary small fw-semibold mb-2">Details last</div>
-          <h2 class="h4 mb-3">What we should work on first</h2>
+          <div class="section-label text-uppercase text-secondary small fw-semibold mb-2">Decision notes</div>
+          <h2 class="h4 mb-3">Current focus summary</h2>
           <div class="doc-body small">{{ engineering_priorities.html | safe }}</div>
         </div>
       </div>
@@ -209,43 +205,5 @@
     </div>
   </section>
 
-  <details class="card card-shadow border-0 mb-4">
-    <summary class="card-body p-4 fw-semibold">Details last: open the full command center sections</summary>
-    <div class="card-body pt-0">
-      <div class="row g-4">
-        <div class="col-12 col-xl-6">
-          <div class="card border-0 section-card section-card-focus h-100">
-            <div class="card-header bg-white fw-semibold">Portfolio Status</div>
-            <div class="card-body doc-body">{{ portfolio_status.html | safe }}</div>
-          </div>
-        </div>
-        <div class="col-12 col-xl-6">
-          <div class="card border-0 section-card section-card-focus h-100">
-            <div class="card-header bg-white fw-semibold">Where We Left Off</div>
-            <div class="card-body doc-body">{{ where_we_left_off.html | safe }}</div>
-          </div>
-        </div>
-        <div class="col-12 col-xl-6">
-          <div class="card border-0 section-card h-100">
-            <div class="card-header bg-white fw-semibold">Latest Daily Log</div>
-            <div class="card-body doc-body">{{ latest_daily_log.html | safe }}</div>
-          </div>
-        </div>
-        <div class="col-12 col-xl-6">
-          <div class="card border-0 section-card h-100">
-            <div class="card-header bg-white fw-semibold">Inbox Snapshot</div>
-            <div class="card-body doc-body">
-              {% for item in inbox_items %}
-                <div class="mb-3">
-                  <div class="fw-semibold">{{ item.title }}</div>
-                  <div class="text-secondary small">{{ item.category.title() }} · {{ item.mtime_display }}</div>
-                </div>
-              {% endfor %}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </details>
 </div>
 {% endblock %}

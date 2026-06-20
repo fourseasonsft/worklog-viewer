@@ -4,18 +4,18 @@
   <section class="hero-card card card-shadow border-0 mb-4">
     <div class="card-body p-4 p-xl-5 d-flex flex-column flex-lg-row justify-content-between gap-3">
       <div>
-        <div class="eyebrow text-uppercase text-secondary small fw-semibold mb-2">Worklog Assistant</div>
-        <h1 class="h2 mb-2">Chat with your Worklog memory</h1>
-        <p class="text-secondary mb-0">Capture first. Group second. Digest third. Approve fourth. Ship fifth. Nothing moves until David approves it.</p>
-        <div class="text-secondary small mt-2">Worklog turns raw thoughts into fixes, features, and updates.</div>
+        <div class="eyebrow text-uppercase text-secondary small fw-semibold mb-2">Idea Inventory</div>
+        <h1 class="h2 mb-2">Capture ideas, group them, approve updates, ship improvements</h1>
+        <p class="text-secondary mb-0">Worklog is IMS for David’s brain. Capture ideas. Group them into Idea Orders. Approve Updates. Ship improvements.</p>
+        <div class="text-secondary small mt-2">Raw ideas stay visible until David approves a Proposed Update.</div>
       </div>
       <div class="text-lg-end">
         <div class="badge {% if openai_enabled %}text-bg-success{% else %}text-bg-warning{% endif %} mb-2">
           {% if openai_enabled %}OpenAI ready{% else %}OpenAI not configured{% endif %}
         </div>
         <div class="d-flex flex-wrap gap-2 justify-content-lg-end">
-          <a class="btn btn-outline-primary btn-sm" href="{{ url_for('dashboard') }}">Back to dashboard</a>
-          <button class="btn btn-outline-secondary btn-sm" type="button" id="digest-button">Digest Thought Box</button>
+          <a class="btn btn-outline-primary btn-sm" href="{{ url_for('dashboard') }}">Dashboard</a>
+          <button class="btn btn-primary btn-sm" type="button" id="proposed-update-button">Proposed Update Review</button>
         </div>
       </div>
     </div>
@@ -24,11 +24,10 @@
   <section class="card card-shadow border-0 mb-4">
     <div class="card-body p-4 p-xl-5">
       <form id="assistant-form" class="assistant-form">
-        <div class="text-secondary small fw-semibold text-uppercase mb-2">Chat</div>
-        <textarea class="form-control assistant-input mb-3" rows="5" name="message" placeholder="hey for IMS we need to do x, y, z"></textarea>
+        <div class="text-secondary small fw-semibold text-uppercase mb-2">Capture idea</div>
+        <textarea class="form-control assistant-input mb-3" rows="5" name="message" placeholder="Need to fix intake copy for IMS and simplify the update flow"></textarea>
         <div class="d-flex flex-wrap gap-2 align-items-center">
-          <button class="btn btn-primary btn-lg" type="submit">Send</button>
-          <button class="btn btn-outline-secondary btn-lg" type="button" id="digest-button-inline">Digest my thought box</button>
+          <button class="btn btn-primary btn-lg" type="submit">Save idea</button>
           <div id="assistant-status" class="text-secondary small"></div>
         </div>
       </form>
@@ -39,23 +38,23 @@
     <div class="card-body p-4 p-xl-5">
       <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-end mb-3">
         <div>
-          <div class="text-secondary small fw-semibold text-uppercase mb-2">Active thought table</div>
-          <h2 class="h3 mb-1">Thoughts waiting in the box</h2>
-          <div class="text-secondary">Thought Box = incoming thoughts. These are the raw pallets David has not approved for routing yet.</div>
+          <div class="text-secondary small fw-semibold text-uppercase mb-2">Idea Inventory</div>
+          <h2 class="h3 mb-1">Raw ideas waiting in the inventory</h2>
+          <div class="text-secondary">These are the raw pallets David has not approved for routing yet.</div>
         </div>
-        <div class="text-secondary small">{{ conversation|length }} active raw thought{{ '' if conversation|length == 1 else 's' }}</div>
+        <div class="text-secondary small">{{ idea_inventory_count }} active raw idea{{ '' if idea_inventory_count == 1 else 's' }}</div>
       </div>
       <div class="table-responsive">
         <table class="table align-middle">
           <thead>
             <tr>
               <th>Created</th>
-              <th>Thought</th>
+              <th>Idea</th>
               <th>Status</th>
               <th>Actions</th>
             </tr>
           </thead>
-          <tbody id="thought-table-body">
+          <tbody id="idea-inventory-body">
             {% if conversation %}
               {% for item in conversation %}
                 <tr data-thought-path="{{ item.path }}">
@@ -65,20 +64,19 @@
                     <div class="text-secondary small">{{ item.raw_text[:180] if item.raw_text else 'No raw text recorded.' }}</div>
                   </td>
                   <td>
-                    <span class="badge text-bg-warning">{{ item.digest_status or 'not_digested' }}</span>
+                    <span class="badge text-bg-warning">Idea Inventory</span>
                     {% if item.ai_inferred_app %}<span class="badge text-bg-light border ms-1">{{ item.ai_inferred_app }}</span>{% endif %}
                   </td>
                   <td>
                     <div class="d-flex flex-wrap gap-2">
                       <a class="btn btn-outline-primary btn-sm" href="{{ url_for('view_file', relative_path=item.path) }}">View</a>
                       <button class="btn btn-outline-secondary btn-sm archive-button" type="button" data-thought-path="{{ item.path }}">Archive</button>
-                      <button class="btn btn-outline-secondary btn-sm reviewed-button" type="button" data-thought-path="{{ item.path }}">Mark reviewed</button>
                     </div>
                   </td>
                 </tr>
               {% endfor %}
             {% else %}
-              <tr><td colspan="4" class="text-secondary">No active raw thoughts yet.</td></tr>
+              <tr><td colspan="4" class="text-secondary">No active raw ideas yet.</td></tr>
             {% endif %}
           </tbody>
         </table>
@@ -90,35 +88,15 @@
     <div class="col-12 col-xl-7">
       <div class="card card-shadow border-0 h-100">
         <div class="card-body p-4 p-xl-5">
-          <div class="text-secondary small fw-semibold text-uppercase mb-3">Conversation log</div>
-          <div id="conversation-log" class="assistant-panel">
-            {% if conversation %}
-              {% for item in conversation %}
-                <div class="chat-turn user-turn">
-                  <div class="chat-label">David</div>
-                  <div class="chat-bubble">{{ item.raw_text or 'No raw text recorded.' }}</div>
-                </div>
-              {% endfor %}
-            {% else %}
-              <div class="text-secondary">No thoughts yet. Send one above.</div>
-            {% endif %}
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="col-12 col-xl-5">
-      <div class="card card-shadow border-0 h-100">
-        <div class="card-body p-4 p-xl-5">
-          <div class="text-secondary small fw-semibold text-uppercase mb-3">Thought Order digest</div>
-          <div id="digest-preview-empty" class="{% if digest_preview %}d-none{% endif %} text-secondary">Ask for a digest preview after capturing raw thoughts.</div>
+          <div class="text-secondary small fw-semibold text-uppercase mb-3">Idea Orders</div>
+          <div id="digest-preview-empty" class="{% if digest_preview %}d-none{% endif %} text-secondary">Request a Proposed Update Review after capturing ideas.</div>
           <div id="digest-preview-body" class="{% if not digest_preview %}d-none{% endif %}">
             {% if digest_preview %}
-              <div class="mb-3"><strong>Summary:</strong> <span id="digest-summary">{{ digest_preview.plain_summary }}</span></div>
-              <div class="mb-3"><strong>Grouped by app:</strong> <span id="digest-grouped">{{ digest_preview.grouped_by_app }}</span></div>
+              <div class="mb-3"><strong>Idea Orders:</strong> <span id="digest-grouped">{{ digest_preview.grouped_by_app }}</span></div>
+              <div class="mb-3"><strong>Proposed Update Summary:</strong> <span id="digest-summary">{{ digest_preview.plain_summary }}</span></div>
               <div class="mb-3"><strong>Recommended Codex prompt:</strong><pre class="assistant-pre" id="digest-codex">{{ digest_preview.recommended_codex_prompt }}</pre></div>
               <div class="mb-3">
-                <strong>Proposed items:</strong>
+                <strong>Proposed Updates:</strong>
                 <span class="text-secondary">Worklog routing suggestions for approval.</span>
                 <div id="proposed-item-list">
                   {% for item in digest_preview.proposed_items %}
@@ -136,31 +114,33 @@
             {% endif %}
           </div>
           <div id="digest-actions" class="d-flex flex-wrap gap-2 {% if not digest_preview %}d-none{% endif %}">
-            <button class="btn btn-primary" type="button" id="approve-digest-button">Approve Digest and Route Items</button>
-            <button class="btn btn-outline-secondary" type="button" id="cancel-digest-button">Cancel / Keep Thoughts Raw</button>
+            <button class="btn btn-primary" type="button" id="approve-digest-button">Approve Update</button>
+            <button class="btn btn-outline-secondary" type="button" id="cancel-digest-button">Keep Ideas Raw</button>
           </div>
         </div>
       </div>
     </div>
-  </section>
 
-  <section class="card card-shadow border-0 mt-4">
-    <div class="card-body p-4 p-xl-5">
-      <div class="text-secondary small fw-semibold text-uppercase mb-3">Updates</div>
-      <h2 class="h4 mb-2">Shipped / live bundles</h2>
-      <div class="text-secondary mb-3">Approved bundles become updates, and completed updates are marked shipped/live separately from the Thought Box.</div>
-      <div class="row g-3">
-        {% for update in update_shipments %}
-          <div class="col-12 col-xl-6">
-            <div class="proposal-card h-100">
-              <div class="fw-semibold">{{ update.title }}</div>
-              <div class="text-secondary small">{{ update.mtime_display }} · {{ update.path }}</div>
-              <div class="text-secondary small mt-2">{{ update.excerpt }}</div>
-            </div>
+    <div class="col-12 col-xl-5">
+      <div class="card card-shadow border-0 h-100">
+        <div class="card-body p-4 p-xl-5">
+          <div class="text-secondary small fw-semibold text-uppercase mb-3">Shipped Updates</div>
+          <h2 class="h4 mb-2">Shipped / live updates</h2>
+          <div class="text-secondary mb-3">Approved updates become shipped update records, separate from the Idea Inventory.</div>
+          <div class="row g-3">
+            {% for update in update_shipments %}
+              <div class="col-12">
+                <div class="proposal-card h-100">
+                  <div class="fw-semibold">{{ update.title }}</div>
+                  <div class="text-secondary small">{{ update.mtime_display }} · {{ update.path }}</div>
+                  <div class="text-secondary small mt-2">{{ update.excerpt }}</div>
+                </div>
+              </div>
+            {% else %}
+              <div class="col-12"><div class="text-secondary">No shipped updates yet.</div></div>
+            {% endfor %}
           </div>
-        {% else %}
-          <div class="col-12"><div class="text-secondary">No shipped updates yet.</div></div>
-        {% endfor %}
+        </div>
       </div>
     </div>
   </section>
@@ -169,8 +149,7 @@
 <script>
 (() => {
   const form = document.getElementById('assistant-form');
-  const digestButton = document.getElementById('digest-button');
-  const digestInline = document.getElementById('digest-button-inline');
+  const proposedUpdateButton = document.getElementById('proposed-update-button');
   const approveButton = document.getElementById('approve-digest-button');
   const cancelButton = document.getElementById('cancel-digest-button');
   const status = document.getElementById('assistant-status');
@@ -182,10 +161,7 @@
   const codexEl = document.getElementById('digest-codex');
   const proposedList = document.getElementById('proposed-item-list');
   const actionBar = document.getElementById('digest-actions');
-  const approveButton = document.getElementById('approve-digest-button');
-  const cancelButton = document.getElementById('cancel-digest-button');
-  const thoughtTable = document.getElementById('thought-table-body');
-  const conversationLog = document.getElementById('conversation-log');
+  const ideaInventoryBody = document.getElementById('idea-inventory-body');
   let digestPreview = {{ digest_preview | tojson if digest_preview else 'null' }};
 
   function renderPreview(data) {
@@ -211,14 +187,12 @@
     if (actionBar) actionBar.classList.remove('d-none');
   }
 
-  async function refreshThoughts() {
+  async function refreshIdeas() {
     const res = await fetch('{{ url_for("assistant_thoughts") }}');
     const data = await res.json();
-    thoughtTable.innerHTML = '';
-    conversationLog.innerHTML = '';
+    ideaInventoryBody.innerHTML = '';
     if (!data.thoughts || !data.thoughts.length) {
-      thoughtTable.innerHTML = '<tr><td colspan="4" class="text-secondary">No active raw thoughts yet.</td></tr>';
-      conversationLog.innerHTML = '<div class="text-secondary">No thoughts yet. Send one above.</div>';
+      ideaInventoryBody.innerHTML = '<tr><td colspan="4" class="text-secondary">No active raw ideas yet.</td></tr>';
       return;
     }
     data.thoughts.forEach((item) => {
@@ -231,49 +205,23 @@
           <div class="text-secondary small">${(item.raw_text || '').slice(0, 180) || 'No raw text recorded.'}</div>
         </td>
         <td>
-          <span class="badge text-bg-warning">${item.digest_status || 'not_digested'}</span>
+          <span class="badge text-bg-warning">Idea Inventory</span>
           ${item.ai_inferred_app ? `<span class="badge text-bg-light border ms-1">${item.ai_inferred_app}</span>` : ''}
         </td>
         <td>
           <div class="d-flex flex-wrap gap-2">
             <a class="btn btn-outline-primary btn-sm" href="/view/${item.path}">View</a>
             <button class="btn btn-outline-secondary btn-sm archive-button" type="button" data-thought-path="${item.path}">Archive</button>
-            <button class="btn btn-outline-secondary btn-sm reviewed-button" type="button" data-thought-path="${item.path}">Mark reviewed</button>
           </div>
         </td>
       `;
-      thoughtTable.appendChild(row);
-
-      const turn = document.createElement('div');
-      turn.className = 'chat-turn user-turn';
-      turn.innerHTML = `<div class="chat-label">David</div><div class="chat-bubble">${(item.raw_text || 'No raw text recorded.')}</div>`;
-      conversationLog.appendChild(turn);
+      ideaInventoryBody.appendChild(row);
     });
-    bindRowButtons();
-  }
-
-  async function sendMessage(message) {
-    status.textContent = 'Thinking...';
-    const res = await fetch('{{ url_for("assistant_message") }}', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({message}),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      status.textContent = data.error || 'Something went wrong.';
-      return;
-    }
-    status.textContent = data.assistant_reply || 'Saved.';
-    if (data.digest_preview) {
-      renderPreview(data.digest_preview);
-    }
-    input.value = '';
-    await refreshThoughts();
+    bindArchiveButtons();
   }
 
   async function requestDigest() {
-    status.textContent = 'Building digest preview...';
+    status.textContent = 'Building proposed update review...';
     const res = await fetch('{{ url_for("assistant_digest_preview") }}', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -281,19 +229,50 @@
     });
     const data = await res.json();
     if (!res.ok) {
-      status.textContent = data.error || 'Digest preview failed.';
+      status.textContent = data.error || 'Proposed update review failed.';
       return;
     }
     renderPreview(data.digest_preview);
-    status.textContent = 'Digest preview ready. Review the proposal before approving.';
+    status.textContent = 'Proposed update review ready.';
+  }
+
+  async function sendMessage(message) {
+    const trimmed = (message || '').trim();
+    if (!trimmed) {
+      status.textContent = 'Enter an idea first.';
+      return;
+    }
+    const digestRequest = trimmed.toLowerCase() === 'digest my thought box'
+      || trimmed.toLowerCase() === 'digest idea inventory'
+      || trimmed.toLowerCase() === 'digest idea orders'
+      || trimmed.toLowerCase() === 'proposed update review';
+    if (digestRequest) {
+      await requestDigest();
+      input.value = '';
+      return;
+    }
+    status.textContent = 'Saving idea...';
+    const res = await fetch('{{ url_for("assistant_message") }}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: trimmed}),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      status.textContent = data.error || 'Something went wrong.';
+      return;
+    }
+    status.textContent = data.assistant_reply || 'Saved.';
+    input.value = '';
+    await refreshIdeas();
   }
 
   async function approveDigest() {
     if (!digestPreview) {
-      status.textContent = 'Build a digest preview first.';
+      status.textContent = 'Build a proposed update review first.';
       return;
     }
-    status.textContent = 'Routing approved items...';
+    status.textContent = 'Approving update...';
     const res = await fetch('{{ url_for("assistant_approve_digest") }}', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -304,11 +283,12 @@
       status.textContent = data.error || 'Approval failed.';
       return;
     }
-    status.textContent = data.assistant_reply || 'Digest approved.';
+    status.textContent = data.assistant_reply || 'Update approved.';
     digestPreview = null;
     previewBody.classList.add('d-none');
     previewEmpty.classList.remove('d-none');
-    await refreshThoughts();
+    if (actionBar) actionBar.classList.add('d-none');
+    await refreshIdeas();
   }
 
   async function cancelDigest() {
@@ -316,7 +296,7 @@
     previewBody.classList.add('d-none');
     previewEmpty.classList.remove('d-none');
     if (actionBar) actionBar.classList.add('d-none');
-    status.textContent = 'Digest cleared. Raw thoughts kept.';
+    status.textContent = 'Proposed update review cleared. Ideas kept raw.';
   }
 
   async function archiveThought(path) {
@@ -330,16 +310,13 @@
       status.textContent = data.error || 'Archive failed.';
       return;
     }
-    status.textContent = 'Thought archived.';
-    await refreshThoughts();
+    status.textContent = 'Idea archived.';
+    await refreshIdeas();
   }
 
-  function bindRowButtons() {
+  function bindArchiveButtons() {
     document.querySelectorAll('.archive-button').forEach((button) => {
       button.onclick = () => archiveThought(button.dataset.thoughtPath);
-    });
-    document.querySelectorAll('.reviewed-button').forEach((button) => {
-      button.onclick = () => status.textContent = 'Marked reviewed locally.';
     });
   }
 
@@ -347,11 +324,10 @@
     event.preventDefault();
     sendMessage(input.value);
   });
-  digestButton.addEventListener('click', requestDigest);
-  digestInline.addEventListener('click', requestDigest);
+  proposedUpdateButton.addEventListener('click', requestDigest);
   if (approveButton) approveButton.addEventListener('click', approveDigest);
   if (cancelButton) cancelButton.addEventListener('click', cancelDigest);
-  bindRowButtons();
+  bindArchiveButtons();
 })();
 </script>
 {% endblock %}

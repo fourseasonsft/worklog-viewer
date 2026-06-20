@@ -71,17 +71,19 @@ class WorklogDashboardTests(unittest.TestCase):
         response = self._client().get("/")
         html = response.get_data(as_text=True)
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Focus second", html)
-        self.assertIn("Quick Capture", html)
-        self.assertIn("Things waiting for a decision", html)
-        self.assertIn("What needs my attention right now?", html)
+        self.assertIn("What needs attention now?", html)
+        self.assertIn("Quick shortcut to Idea Inventory", html)
+        self.assertIn("Active, proposed, and shipped updates", html)
+        self.assertNotIn("Promote", html)
+        self.assertNotIn("Mark reviewed", html)
+        self.assertNotIn("Details last", html)
 
     def test_intake_route_renders_capture_page(self) -> None:
         response = self._client().get("/intake")
         html = response.get_data(as_text=True)
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Intake Dashboard", html)
-        self.assertIn("Create Intake Item", html)
+        self.assertIn("Structured Intake", html)
+        self.assertIn("Create structured work item", html)
 
     def test_intake_form_creates_markdown_item(self) -> None:
         response = self._client().post(

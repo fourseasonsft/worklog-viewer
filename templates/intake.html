@@ -5,11 +5,12 @@
       <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
         <div>
           <div class="text-uppercase text-secondary small fw-semibold mb-1">FSFT Worklog</div>
-          <h1 class="h2 mb-2">Intake Dashboard</h1>
-          <div class="text-secondary">Capture notes, bugs, features, blockers, support items, and customer requests into the markdown Worklog.</div>
+          <h1 class="h2 mb-2">Structured Intake</h1>
+          <div class="text-secondary">Use this for deliberate manual entry. For raw ideas, go to Idea Inventory.</div>
         </div>
         <div class="d-flex flex-wrap gap-2">
           <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('dashboard') }}">Back to dashboard</a>
+          <a class="btn btn-outline-primary btn-sm" href="{{ url_for('assistant') }}">Open Idea Inventory</a>
           <a class="btn btn-outline-primary btn-sm" href="{{ url_for('intake', plain=0 if plain_mode else 1) }}">{{ 'Technical view' if plain_mode else 'Plain-English mode' }}</a>
         </div>
       </div>
@@ -25,7 +26,7 @@
 
   <div class="card card-shadow border-0 mb-4">
     <div class="card-body">
-      <h2 class="h4 mb-3">Create Intake Item</h2>
+      <h2 class="h4 mb-3">Create structured work item</h2>
       <form method="post" action="{{ url_for('intake') }}">
         <input type="hidden" name="plain_mode" value="{{ '1' if plain_mode else '0' }}">
         <div class="row g-3">

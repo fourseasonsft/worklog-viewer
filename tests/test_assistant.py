@@ -85,10 +85,13 @@ class WorklogAssistantTests(unittest.TestCase):
     def test_assistant_renders(self) -> None:
         response = self._client().get("/assistant")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Worklog Assistant", response.get_data(as_text=True))
-        self.assertIn("Active thought table", response.get_data(as_text=True))
+        html = response.get_data(as_text=True)
+        self.assertIn("Idea Inventory", html)
+        self.assertIn("Proposed Update Review", html)
+        self.assertIn("Raw ideas waiting in the inventory", html)
+        self.assertNotIn("Conversation log", html)
 
-    def test_message_stores_raw_thought(self) -> None:
+    def test_message_stores_raw_idea(self) -> None:
         response = self._client().post(
             "/api/assistant/message",
             json={"message": "hey for IMS we need to do x, y, z"},
@@ -108,7 +111,7 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("OpenAI is not configured", body["assistant_reply"])
 
-    def test_digest_preview_reads_undigested_thought_files(self) -> None:
+    def test_digest_preview_reads_undigested_idea_files(self) -> None:
         thought = self.root / "04-inbox/thought-box/2026-06-20-100000-ims-break-bulk.md"
         thought.write_text(
             "# IMS\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs break bulk handling.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs break bulk handling.\n",
@@ -119,8 +122,8 @@ class WorklogAssistantTests(unittest.TestCase):
         after = sorted(p.name for p in (self.root / "04-inbox/thought-box").glob("*.md"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(before, after)
-        self.assertIn("Digest preview", response.get_data(as_text=True))
-        self.assertIn("Proposed items", response.get_data(as_text=True))
+        self.assertIn("Proposed Update Review", response.get_data(as_text=True))
+        self.assertIn("Proposed Updates", response.get_data(as_text=True))
 
     def test_digest_preview_does_not_move_files(self) -> None:
         thought = self.root / "04-inbox/thought-box/2026-06-20-110000-general.md"
@@ -132,8 +135,16 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertTrue(thought.exists())
         self.assertEqual(thought.parent.name, "thought-box")
 
-    def test_digest_command_does_not_create_raw_thought(self) -> None:
+    def test_digest_command_does_not_create_raw_idea(self) -> None:
         response = self._client().post("/api/assistant/message", json={"message": "digest my thought box"})
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertFalse(body["created_raw_thought"])
+        self.assertIn("digest_preview", body)
+        self.assertEqual(list((self.root / "04-inbox/thought-box").glob("*.md")), [])
+
+    def test_digest_idea_inventory_command_does_not_create_raw_idea(self) -> None:
+        response = self._client().post("/api/assistant/message", json={"message": "digest idea inventory"})
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
         self.assertFalse(body["created_raw_thought"])
@@ -143,7 +154,7 @@ class WorklogAssistantTests(unittest.TestCase):
     def test_no_thoughts_empty_state_works(self) -> None:
         response = self._client().get("/assistant")
         html = response.get_data(as_text=True)
-        self.assertIn("No active raw thoughts yet.", html)
+        self.assertIn("No active raw ideas yet.", html)
 
     def test_approve_digest_creates_items_and_moves_thoughts(self) -> None:
         thought1 = self.root / "04-inbox/thought-box/2026-06-20-100000-ims.md"
@@ -166,7 +177,7 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertTrue(list((self.root / "04-inbox/thought-box/digested").glob("*.md")))
         self.assertTrue(list((self.root / "05-release-notes/assistant-update-shipments").glob("*.md")))
         html = self._client().get("/assistant").get_data(as_text=True)
-        self.assertIn("No active raw thoughts yet.", html)
+        self.assertIn("No active raw ideas yet.", html)
 
     def test_update_bundle_tracked_separately(self) -> None:
         thought = self.root / "04-inbox/thought-box/2026-06-20-130000-ims.md"

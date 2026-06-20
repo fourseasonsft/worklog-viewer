@@ -138,7 +138,7 @@ def _latest_daily_log() -> str | None:
 def _nav_items() -> list[dict[str, str]]:
     return [
         {"label": "Dashboard", "endpoint": "dashboard"},
-        {"label": "Assistant", "endpoint": "assistant"},
+        {"label": "Idea Inventory", "endpoint": "assistant"},
         {"label": "Portfolio Status", "endpoint": "view_file", "args": {"relative_path": "00-dashboard/portfolio-status.md"}},
         {"label": "Engineering Priorities", "endpoint": "view_file", "args": {"relative_path": "00-dashboard/engineering-priorities.md"}},
         {"label": "Roadmap", "endpoint": "roadmap"},
@@ -594,7 +594,7 @@ def _digest_groups_from_items(items: list[dict[str, str]]) -> dict[str, object]:
         json.dumps([item.get("path") for item in items], sort_keys=True).encode("utf-8")
     ).hexdigest()[:16]
     preview["source_thoughts"] = [item.get("path") for item in items]
-    preview["update_bundle_title"] = "Worklog Assistant Update"
+    preview["update_bundle_title"] = "Worklog Idea Update"
     preview["update_status"] = "proposed"
     return preview
 
@@ -608,7 +608,7 @@ def _assistant_update_shipments() -> list[dict[str, str]]:
             {
                 "path": str(path.relative_to(WORKLOG_ROOT)),
                 "title": path.stem.replace("-", " ").title(),
-                "excerpt": _first_nonempty_paragraph(text) or "Shipped/live update bundle.",
+                "excerpt": _first_nonempty_paragraph(text) or "Shipped update.",
                 "mtime_display": _format_file_timestamp(path),
             }
         )
@@ -617,7 +617,7 @@ def _assistant_update_shipments() -> list[dict[str, str]]:
 
 def _write_update_shipment_record(preview: dict[str, object], created_items: list[str], moved_paths: list[str]) -> Path:
     _assistant_update_shipments_dir().mkdir(parents=True, exist_ok=True)
-    title = str(preview.get("update_bundle_title") or "Worklog Assistant Update")
+    title = str(preview.get("update_bundle_title") or "Worklog Idea Update")
     path = _assistant_update_shipments_dir() / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H%M%S')}-{_slugify_title(title)}.md"
     path.write_text(
         "\n".join(
@@ -628,6 +628,7 @@ def _write_update_shipment_record(preview: dict[str, object], created_items: lis
                 f"- created_at: {datetime.now(timezone.utc).isoformat()}",
                 f"- source_thought_count: {len(preview.get('source_thoughts', []))}",
                 f"- created_work_items: {len(created_items)}",
+                f"- created_items: {', '.join(created_items) if created_items else 'None'}",
                 "",
                 "## Summary",
                 str(preview.get("plain_summary") or "Approved and routed Worklog update."),
@@ -635,7 +636,7 @@ def _write_update_shipment_record(preview: dict[str, object], created_items: lis
                 "## Routed Work Items",
                 *([f"- {item}" for item in created_items] or ["- None"]),
                 "",
-                "## Source Thought Files",
+                "## Source Ideas",
                 *([f"- {item}" for item in moved_paths] or ["- None"]),
                 "",
             ]
@@ -1213,12 +1214,9 @@ def dashboard():
         "support": counts["open_support"],
     }
     secondary_nav = [
-        {"label": "Dashboard", "href": "#top"},
-        {"label": "Capture", "href": "#capture"},
-        {"label": "Today", "href": "#today"},
-        {"label": "Inbox", "href": "#triage"},
-        {"label": "Apps", "href": "#apps"},
-        {"label": "Archive", "href": url_for("inbox_closed")},
+        {"label": "Idea Inventory", "href": url_for("assistant")},
+        {"label": "Intake", "href": url_for("intake")},
+        {"label": "Inbox", "href": url_for("inbox")},
     ]
 
     return render_template(
@@ -1381,6 +1379,7 @@ def assistant():
         digest_preview=digest_preview,
         update_shipments=_assistant_update_shipments(),
         openai_enabled=_openai_available(),
+        idea_inventory_count=len(_thought_box_items(digested_only=False)),
     )
 
 
@@ -1397,11 +1396,11 @@ def assistant_message():
     message = (payload.get("message") or "").strip()
     if not message:
         return {"error": "message is required"}, 400
-    if message.lower() == "digest my thought box":
+    if message.lower() in {"digest my thought box", "digest idea inventory", "digest idea orders"}:
         preview = _digest_groups_from_items(_thought_box_items(digested_only=False))
         return {
             "ok": True,
-            "assistant_reply": "Digest preview prepared. Review the proposal before approving.",
+            "assistant_reply": "Proposed update review prepared. Review the proposal before approving.",
             "digest_preview": preview,
             "created_raw_thought": False,
         }
@@ -1410,12 +1409,12 @@ def assistant_message():
     data = {
         "ok": True,
         "thought_path": str(thought_path.relative_to(WORKLOG_ROOT)),
-        "assistant_reply": "Saved your thought. I can digest it when you ask.",
+        "assistant_reply": "Saved your idea. I can digest it when you ask.",
         "digest_status": "not_digested",
         **inferred,
     }
     if _openai_available():
-        data["assistant_reply"] = "I saved that thought. OpenAI-backed digestion is available, but the assistant stays scoped to Worklog and KB context."
+        data["assistant_reply"] = "I saved that idea. OpenAI-backed digestion is available, but the assistant stays scoped to Worklog and KB context."
     else:
         data["assistant_reply"] = _safe_openai_error()
     return data
@@ -1496,7 +1495,7 @@ def assistant_approve_digest():
         "created_items": created_items,
         "moved_thoughts": moved_paths,
         "update_shipment": str(update_record.relative_to(WORKLOG_ROOT)),
-        "assistant_reply": "Digest approved. Routed items were created and raw thoughts were moved to digested.",
+        "assistant_reply": "Update approved. Routed items were created and raw ideas were moved to digested.",
     }
 
 
