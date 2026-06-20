@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card surface-card card-shadow border-0 mb-4">
+  <div class="card-body p-4 p-xl-5">
+    <div class="d-flex flex-column flex-xl-row justify-content-between gap-4 align-items-xl-start">
+      <div>
+        <div class="eyebrow text-uppercase text-secondary small fw-semibold mb-2">Sprint Queue</div>
+        <h1 class="h2 mb-2">What are we building next, now, and what shipped?</h1>
+        <p class="text-secondary mb-0">Approved sprint handoffs become queue records here. Use filters to move from proposed to active to shipped.</p>
+      </div>
+      <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('dashboard') }}">Dashboard</a>
+        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('assistant') }}">Idea Inventory</a>
+        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('inbox') }}">Inbox</a>
+        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('release_notes') }}">Updates</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="card surface-card card-shadow border-0 mb-4">
+  <div class="card-body p-4 p-xl-5">
+    <form method="get" action="{{ url_for('sprints') }}" class="row g-3 align-items-end">
+      <div class="col-12 col-md-6 col-xl-3">
+        <label class="form-label">Status</label>
+        <select class="form-select" name="status">
+          {% for option in status_options %}
+            <option value="{{ option.value }}" {% if option.value == status_filter %}selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-md-6 col-xl-3">
+        <label class="form-label">App / Product</label>
+        <select class="form-select" name="app">
+          {% for option in app_filters %}
+            <option value="{{ option.value }}" {% if option.value == app_filter %}selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-xl-6 d-flex flex-wrap gap-2">
+        <button class="btn btn-primary" type="submit">Apply filters</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('sprints') }}">Reset</a>
+      </div>
+    </form>
+  </div>
+</section>
+
+<section class="card surface-card card-shadow border-0">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table inbox-table align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Sprint Name</th>
+            <th>App/Product</th>
+            <th>Status</th>
+            <th>Idea Count</th>
+            <th>Scope</th>
+            <th>Created</th>
+            <th>Updated</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if records %}
+            {% for record in records %}
+              <tr>
+                <td class="fw-semibold">{{ record.title }}</td>
+                <td><span class="badge text-bg-light border">{{ record.app_product }}</span></td>
+                <td><span class="badge {% if record.status_key == 'active' %}text-bg-primary{% elif record.status_key == 'approved' %}text-bg-warning{% elif record.status_key == 'completed' %}text-bg-secondary{% elif record.status_key == 'shipped' %}text-bg-success{% else %}text-bg-light border{% endif %}">{{ record.status }}</span></td>
+                <td>{{ record.idea_count }}</td>
+                <td>{{ record.scope }}</td>
+                <td class="text-nowrap">{{ record.created_at }}</td>
+                <td class="text-nowrap">{{ record.updated_at }}</td>
+                <td>
+                  <div class="d-flex flex-wrap gap-2">
+                    <a class="btn btn-outline-primary btn-sm" href="{{ url_for('sprint_detail', sprint_id=record.id) }}">View</a>
+                    {% if record.status_key == 'approved' %}
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="start">
+                        <button class="btn btn-outline-secondary btn-sm" type="submit">Start Sprint</button>
+                      </form>
+                    {% elif record.status_key == 'active' %}
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="complete">
+                        <button class="btn btn-outline-secondary btn-sm" type="submit">Complete Sprint</button>
+                      </form>
+                    {% elif record.status_key == 'completed' %}
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="ship">
+                        <button class="btn btn-outline-secondary btn-sm" type="submit">Mark Shipped</button>
+                      </form>
+                    {% endif %}
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="8" class="p-4 text-secondary">No sprint records match the selected filters.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -50,6 +50,7 @@ TOP_DASHBOARD_FILES = [
 INBOX_FOLDERS = ["new", "bugs", "features", "support"]
 THOUGHT_BOX_DIR = WORKLOG_ROOT / "04-inbox/thought-box"
 SPRINT_HANDOFFS_DIR = WORKLOG_ROOT / "05-sprint-handoffs"
+SPRINTS_ROOT_DIR = WORKLOG_ROOT / "06-sprints"
 INTAKE_TYPE_BUCKETS = {
     "bug": "bugs",
     "feature": "features",
@@ -163,6 +164,7 @@ def _nav_items() -> list[dict[str, str]]:
             "items": [
                 {"label": "Dashboard", "endpoint": "dashboard"},
                 {"label": "Idea Inventory", "endpoint": "assistant"},
+                {"label": "Sprint Queue", "endpoint": "sprints"},
                 {"label": "Updates", "endpoint": "release_notes"},
                 {"label": "Inbox", "endpoint": "inbox"},
                 {"label": "Daily Log", "endpoint": "daily_logs"},
@@ -314,6 +316,11 @@ def _normalize_app_filter(value: str | None) -> str:
     return "other"
 
 
+def _app_slug_from_title(title: str) -> str:
+    slug = _normalize_app_filter(title)
+    return slug if slug != "all" else "other"
+
+
 def _parse_active_work_file(relative_path: str, title: str) -> dict[str, object]:
     source_path = WORKLOG_ROOT / relative_path
     text = source_path.read_text(encoding="utf-8")
@@ -340,6 +347,7 @@ def _parse_active_work_file(relative_path: str, title: str) -> dict[str, object]
     inbox_items = _related_inbox_items(title)
     return {
         "title": title,
+        "slug": _app_slug_from_title(title),
         "path": relative_path,
         "current_sprint_name": current_name,
         "current_sprint_status": status,
@@ -356,6 +364,7 @@ def _parse_active_work_file(relative_path: str, title: str) -> dict[str, object]
         "last_updated": last_updated,
         "inbox_items": inbox_items,
         "has_active_sprint": bool(current_name),
+        "sprint_counts": _sprint_counts_by_app().get(title, {"proposed": 0, "approved": 0, "active": 0, "completed": 0, "shipped": 0}),
     }
 
 
@@ -668,6 +677,116 @@ def _sprint_handoffs_dir() -> Path:
     return SPRINT_HANDOFFS_DIR
 
 
+def _sprints_dir(status: str | None = None) -> Path:
+    if status:
+        return SPRINTS_ROOT_DIR / status.lower()
+    return SPRINTS_ROOT_DIR
+
+
+def _ensure_sprint_dirs() -> None:
+    for status in ["proposed", "approved", "active", "completed", "shipped"]:
+        _sprints_dir(status).mkdir(parents=True, exist_ok=True)
+
+
+def _sprint_record_path(status: str, sprint_id: str, title: str) -> Path:
+    return _sprints_dir(status) / f"{sprint_id}-{_slugify_title(title)}.md"
+
+
+def _sprint_id_prefix() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+
+
+def _write_sprint_record(group: dict[str, object], status: str = "approved") -> Path:
+    _ensure_sprint_dirs()
+    sprint_id = str(group.get("sprint_id") or f"sp-{_sprint_id_prefix()}")
+    title = str(group.get("sprint_group_name") or "Sprint")
+    path = _sprint_record_path(status, sprint_id, title)
+    source_thoughts = [str(item) for item in group.get("source_thoughts", [])]
+    digested_thoughts = [str(item) for item in group.get("digested_source_thoughts", [])]
+    app_product = str(group.get("app_product") or "Other")
+    handoff_path = str(group.get("handoff_path") or "")
+    text = "\n".join(
+        [
+            f"# Sprint Queue Record: {title}",
+            "",
+            f"- sprint_id: {sprint_id}",
+            f"- app_product: {app_product}",
+            f"- status: {status}",
+            f"- scope: {group.get('scope') or 'Small'}",
+            f"- idea_count: {group.get('ideas_included') or len(source_thoughts)}",
+            f"- created_at: {group.get('created_at') or datetime.now(timezone.utc).isoformat()}",
+            f"- updated_at: {datetime.now(timezone.utc).isoformat()}",
+            f"- handoff_path: {handoff_path}",
+            "",
+            "## Source Ideas",
+            *([f"- {item}" for item in source_thoughts] or ["- None"]),
+            "",
+            "## Digested Source Ideas",
+            *([f"- {item}" for item in digested_thoughts] or ["- None"]),
+            "",
+            "## Proposed Work",
+            *([f"- {item}" for item in group.get('proposed_work', [])] or ["- Triage raw ideas into a focused sprint slice."]),
+            "",
+            "## Handoff Markdown",
+            f"{group.get('handoff_path') or ''}",
+            "",
+            "## Codex/ChatGPT Starting Prompt",
+            str(group.get("starting_prompt") or ""),
+            "",
+        ]
+    )
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _parse_sprint_record(path: Path) -> dict[str, object]:
+    text = path.read_text(encoding="utf-8")
+    meta = _parse_key_value_metadata(text)
+    status = meta.get("status") or path.parent.name
+    app_product = meta.get("app_product") or "Other"
+    sprint_id = meta.get("sprint_id") or path.stem.split("-", 1)[0]
+    title = path.stem.split("-", 1)[1].replace("-", " ").title() if "-" in path.stem else path.stem.title()
+    source_thoughts = []
+    digested_source_thoughts = []
+    proposed_work = []
+    current_section = None
+    for line in text.splitlines():
+        if line.startswith("## "):
+            current_section = line[3:].strip().lower()
+            continue
+        if current_section in {"source ideas", "source thought(s)"} and line.startswith("- "):
+            source_thoughts.append(line[2:].strip())
+        elif current_section == "digested source ideas" and line.startswith("- "):
+            digested_source_thoughts.append(line[2:].strip())
+        elif current_section == "proposed work" and line.startswith("- "):
+            proposed_work.append(line[2:].strip())
+    handoff_path = meta.get("handoff_path") or ""
+    handoff_markdown = ""
+    if handoff_path:
+        handoff_file = WORKLOG_ROOT / str(handoff_path)
+        if handoff_file.exists():
+            handoff_markdown = handoff_file.read_text(encoding="utf-8")
+    return {
+        "id": sprint_id,
+        "title": title,
+        "app_product": app_product,
+        "status": status.title(),
+        "status_key": status.lower(),
+        "idea_count": int(meta.get("idea_count") or len(source_thoughts) or 0),
+        "scope": meta.get("scope") or "Small",
+        "created_at": meta.get("created_at") or _format_file_timestamp(path),
+        "updated_at": meta.get("updated_at") or _format_file_timestamp(path),
+        "path": str(path.relative_to(WORKLOG_ROOT)),
+        "source_thoughts": source_thoughts,
+        "digested_source_thoughts": digested_source_thoughts,
+        "proposed_work": proposed_work,
+        "handoff_path": handoff_path,
+        "handoff_markdown": handoff_markdown,
+        "raw_html": _render_markdown(text),
+        "starting_prompt": meta.get("starting_prompt") or _extract_section_text(text, "Codex/ChatGPT Starting Prompt"),
+    }
+
+
 def _write_sprint_handoff_file(group: dict[str, object]) -> Path:
     _sprint_handoffs_dir().mkdir(parents=True, exist_ok=True)
     title = str(group.get("sprint_group_name") or "Sprint Handoff")
@@ -831,6 +950,74 @@ def _assistant_update_shipments() -> list[dict[str, str]]:
             }
         )
     return shipments
+
+
+def _sprint_records() -> list[dict[str, object]]:
+    _ensure_sprint_dirs()
+    records = []
+    for status in ["proposed", "approved", "active", "completed", "shipped"]:
+        for path in sorted(_sprints_dir(status).glob("*.md"), reverse=True):
+            record = _parse_sprint_record(path)
+            record["status_key"] = status
+            record["status"] = status.title()
+            records.append(record)
+    records.sort(key=lambda item: (item.get("updated_at", ""), item.get("created_at", ""), item.get("id", "")), reverse=True)
+    return records
+
+
+def _filter_sprint_records(records: list[dict[str, object]], status: str, app_slug: str) -> list[dict[str, object]]:
+    status = (status or "all").lower()
+    app_slug = _normalize_app_filter(app_slug)
+    if status == "all":
+        filtered = records
+    else:
+        filtered = [record for record in records if record.get("status_key") == status]
+    if app_slug != "all":
+        filtered = [record for record in filtered if _normalize_app_filter(str(record.get("app_product") or "")) == app_slug]
+    return filtered
+
+
+def _sprint_counts_by_app() -> dict[str, dict[str, int]]:
+    counts = {app: {"proposed": 0, "approved": 0, "active": 0, "completed": 0, "shipped": 0} for app in APP_FILTERS.values()}
+    for record in _sprint_records():
+        app = record.get("app_product") or "Other"
+        if app not in counts:
+            counts[app] = {"proposed": 0, "approved": 0, "active": 0, "completed": 0, "shipped": 0}
+        key = str(record.get("status_key") or "proposed")
+        if key in counts[app]:
+            counts[app][key] += 1
+    return counts
+
+
+def _update_sprint_record(record_path: Path, status: str) -> Path:
+    text = record_path.read_text(encoding="utf-8")
+    text = re.sub(r"^- status: .*?$", f"- status: {status}", text, flags=re.M)
+    text = re.sub(r"^- updated_at: .*?$", f"- updated_at: {datetime.now(timezone.utc).isoformat()}", text, flags=re.M)
+    target_dir = _sprints_dir(status)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    new_path = target_dir / record_path.name
+    if new_path != record_path:
+        record_path.rename(new_path)
+    new_path.write_text(text, encoding="utf-8")
+    return new_path
+
+
+def _sprint_record_by_id(sprint_id: str) -> dict[str, object] | None:
+    for record in _sprint_records():
+        if record.get("id") == sprint_id:
+            return record
+    return None
+
+
+def _sprint_queue_dashboard_counts() -> dict[str, int]:
+    records = _sprint_records()
+    return {
+        "proposed": sum(1 for record in records if record.get("status_key") == "proposed"),
+        "approved": sum(1 for record in records if record.get("status_key") == "approved"),
+        "active": sum(1 for record in records if record.get("status_key") == "active"),
+        "completed": sum(1 for record in records if record.get("status_key") == "completed"),
+        "shipped": sum(1 for record in records if record.get("status_key") == "shipped"),
+    }
 
 
 def _write_update_shipment_record(preview: dict[str, object], created_items: list[str], moved_paths: list[str]) -> Path:
@@ -1205,6 +1392,11 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
                 "suggested_priority": priority,
                 "recommended_first_step": first_step,
                 "source_thoughts": [thought["path"] for thought in cluster_thoughts],
+                "proposed_work": [
+                    thought.get("raw_text", "").strip().splitlines()[0][:160]
+                    for thought in cluster_thoughts
+                    if thought.get("raw_text")
+                ],
                 "scope": _sprint_group_scope(cluster_thoughts),
                 "purpose": f"Turn {app_name} ideas into a focused {cluster_name} sprint.",
                 "starting_prompt": _build_codex_prompt(app_name, sprint_name, cluster_thoughts),
@@ -1225,6 +1417,7 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
                 "suggested_priority": _sprint_group_priority([thought]),
                 "recommended_first_step": thought.get("raw_text", "").splitlines()[0][:160] if thought.get("raw_text") else "Review the source idea.",
                 "source_thoughts": [thought["path"]],
+                "proposed_work": [thought.get("raw_text", "").strip().splitlines()[0][:160]] if thought.get("raw_text") else [],
                 "scope": "Small",
                 "purpose": f"Turn {thought['ai_inferred_app']} ideas into a focused sprint.",
                 "starting_prompt": _build_codex_prompt(thought["ai_inferred_app"], sprint_name, [thought]),
@@ -1547,11 +1740,13 @@ def dashboard():
     counts = _dashboard_counts()
     inbox_items = _recent_inbox_items()
     update_shipments = _assistant_update_shipments()
+    sprint_counts = _sprint_counts_by_app()
 
     return render_template(
         "dashboard.html",
         counts=counts,
         app_cards=app_cards,
+        sprint_counts=sprint_counts,
         inbox_items=inbox_items,
         update_shipments=update_shipments,
     )
@@ -1729,6 +1924,75 @@ def assistant():
     )
 
 
+@app.route("/sprints", methods=["GET"])
+@_require_worklog_session
+def sprints():
+    status = (request.args.get("status") or "all").strip().lower()
+    if status not in {"all", "proposed", "approved", "active", "completed", "shipped"}:
+        status = "all"
+    app_slug = _normalize_app_filter(request.args.get("app"))
+    records = _filter_sprint_records(_sprint_records(), status, app_slug)
+    return render_template(
+        "sprints.html",
+        title="Sprint Queue",
+        records=records,
+        status_filter=status,
+        app_filter=app_slug,
+        status_options=[
+            {"value": "all", "label": "All"},
+            {"value": "proposed", "label": "Proposed"},
+            {"value": "approved", "label": "Approved"},
+            {"value": "active", "label": "Active"},
+            {"value": "completed", "label": "Completed"},
+            {"value": "shipped", "label": "Shipped"},
+        ],
+        app_filters=[
+            {"value": "all", "label": "All Apps"},
+            {"value": "core", "label": "Core"},
+            {"value": "unity", "label": "Unity"},
+            {"value": "ims", "label": "IMS"},
+            {"value": "cy-storage", "label": "CY Storage"},
+            {"value": "dispatch", "label": "Dispatch"},
+            {"value": "parking", "label": "Parking"},
+            {"value": "hiring", "label": "Hiring"},
+            {"value": "worklog", "label": "Worklog"},
+            {"value": "other", "label": "Other"},
+        ],
+    )
+
+
+@app.route("/sprints/<sprint_id>", methods=["GET"])
+@_require_worklog_session
+def sprint_detail(sprint_id: str):
+    record = _sprint_record_by_id(sprint_id)
+    if not record:
+        abort(404)
+    return render_template(
+        "sprint_detail.html",
+        title=record["title"],
+        record=record,
+    )
+
+
+@app.route("/sprints/<sprint_id>/action", methods=["POST"])
+@_require_worklog_session
+def sprint_action(sprint_id: str):
+    action = (request.form.get("action") or "").strip().lower()
+    record = _sprint_record_by_id(sprint_id)
+    if not record:
+        abort(404)
+    record_path = WORKLOG_ROOT / str(record["path"])
+    if action == "start":
+        new_path = _update_sprint_record(record_path, "active")
+    elif action == "complete":
+        new_path = _update_sprint_record(record_path, "completed")
+    elif action == "ship":
+        new_path = _update_sprint_record(record_path, "shipped")
+    else:
+        abort(400)
+    return redirect(url_for("sprint_detail", sprint_id=sprint_id))
+
+
 @app.route("/api/assistant/thoughts")
 @_require_worklog_session
 def assistant_thoughts():
@@ -1792,6 +2056,7 @@ def assistant_approve_digest():
     by_path = {item["path"]: item for item in thoughts}
     moved_paths: list[str] = []
     created_handoffs: list[str] = []
+    created_sprints: list[str] = []
     for proposal in preview.get("sprint_groups", []):
         proposal_paths = [str(path) for path in proposal.get("source_thoughts", [])]
         active_thoughts = [by_path[path] for path in proposal_paths if path in by_path]
@@ -1800,7 +2065,21 @@ def assistant_approve_digest():
         fingerprints = {_thought_item_fingerprint(item) for item in active_thoughts}
         if len(fingerprints) == 0:
             continue
-        handoff_path = _write_sprint_handoff_file(proposal)
+        sprint_record = {
+            **proposal,
+            "status": "approved",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "proposed_work": proposal.get("proposed_work") or [],
+            "digested_source_thoughts": [],
+        }
+        handoff_path = _write_sprint_handoff_file(sprint_record)
+        sprint_record["handoff_path"] = str(handoff_path.relative_to(WORKLOG_ROOT))
+        sprint_path = None
+        moved_for_group: list[str] = []
+        sprint_record["digested_source_thoughts"] = moved_for_group
+        sprint_path = _write_sprint_record(sprint_record, "approved")
+        created_sprints.append(str(sprint_path.relative_to(WORKLOG_ROOT)))
         created_handoffs.append(str(handoff_path.relative_to(WORKLOG_ROOT)))
         for thought in active_thoughts:
             source_file = WORKLOG_ROOT / thought["path"]
@@ -1808,9 +2087,17 @@ def assistant_approve_digest():
                 continue
             destination = _move_thought(source_file, _thought_digested_dir())
             moved_paths.append(str(destination.relative_to(WORKLOG_ROOT)))
+            moved_for_group.append(str(destination.relative_to(WORKLOG_ROOT)))
+        sprint_path.write_text(
+            sprint_path.read_text(encoding="utf-8").replace(
+                "## Digested Source Ideas\n- None",
+                "## Digested Source Ideas\n" + ("\n".join(f"- {item}" for item in moved_for_group) if moved_for_group else "- None"),
+            ),
+            encoding="utf-8",
+        )
 
     record_path = _sprint_handoffs_dir() / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H%M%S')}-digest-record.md"
-    created_lines = [f"- {item}" for item in created_handoffs] or ["- None"]
+    created_lines = [f"- {item}" for item in created_sprints] or ["- None"]
     moved_lines = [f"- {item}" for item in moved_paths] or ["- None"]
     record_path.write_text(
         "\n".join(
@@ -1819,9 +2106,9 @@ def assistant_approve_digest():
                 "",
                 f"- created_at: {datetime.now(timezone.utc).isoformat()}",
                 f"- source_count: {len(thoughts)}",
-                f"- created_handoffs: {len(created_handoffs)}",
+                f"- created_sprints: {len(created_sprints)}",
                 "",
-                "## Created Sprint Handoffs",
+                "## Created Sprint Queue Records",
                 *created_lines,
                 "",
                 "## Moved Thought Files",
@@ -1834,6 +2121,7 @@ def assistant_approve_digest():
 
     return {
         "ok": True,
+        "created_sprints": created_sprints,
         "created_handoffs": created_handoffs,
         "moved_thoughts": moved_paths,
         "assistant_reply": "Sprint handoffs approved. Handoff markdown files were created and raw ideas were moved to digested.",
