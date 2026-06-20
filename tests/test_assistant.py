@@ -102,6 +102,7 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("Approved Sprint Queue", html)
         self.assertIn("Digest Selected", html)
         self.assertIn("select-all-ideas", html)
+        self.assertNotIn("Inventory Actions", html)
 
     def test_message_stores_raw_idea(self) -> None:
         response = self._client().post(

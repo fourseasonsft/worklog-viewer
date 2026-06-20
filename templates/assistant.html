@@ -22,19 +22,6 @@
 
   <section class="card surface-card card-shadow border-0 mb-4">
     <div class="card-body p-4 p-xl-5">
-      <div id="inventory-action-bar" class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center mb-3">
-        <div>
-          <div class="text-uppercase text-secondary small fw-semibold mb-2">Inventory Actions</div>
-          <div class="d-flex flex-wrap align-items-center gap-2">
-            <span class="badge text-bg-light border" id="selected-count-badge">0 selected</span>
-            <button class="btn btn-primary btn-sm" type="button" id="digest-selected-button" disabled>Digest Selected</button>
-            <button class="btn btn-outline-primary btn-sm" type="button" id="digest-all-button">Digest All</button>
-            <button class="btn btn-outline-secondary btn-sm" type="button" id="archive-selected-button" disabled>Archive Selected</button>
-            <button class="btn btn-outline-secondary btn-sm" type="button" id="clear-selection-button" disabled>Clear Selection</button>
-          </div>
-        </div>
-        <div id="selection-status" class="text-secondary small">Select one or more raw ideas to digest a focused inventory slice.</div>
-      </div>
       <form id="assistant-form" class="assistant-form">
         <div class="d-flex justify-content-between align-items-end gap-3 mb-3">
           <div>
@@ -54,13 +41,22 @@
 
   <section class="card surface-card card-shadow border-0 mb-4">
     <div class="card-body p-4 p-xl-5">
-      <div class="d-flex justify-content-between align-items-end gap-3 mb-3">
+      <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-start mb-3">
         <div>
           <div class="text-uppercase text-secondary small fw-semibold mb-2">Active Idea Inventory</div>
           <h2 class="h3 mb-1">Raw ideas waiting in inventory</h2>
-          <div class="text-secondary">Ideas stay here until David approves sprint handoffs.</div>
+          <div class="text-secondary">{{ idea_inventory_count }} active idea{{ '' if idea_inventory_count == 1 else 's' }}</div>
         </div>
-        <div class="text-secondary small">{{ idea_inventory_count }} active raw idea{{ '' if idea_inventory_count == 1 else 's' }}</div>
+        <div id="inventory-action-bar" class="d-flex flex-column gap-2 align-items-lg-end">
+          <div class="d-flex flex-wrap align-items-center justify-content-lg-end gap-2">
+            <span class="badge text-bg-light border" id="selected-count-badge">0 selected</span>
+            <button class="btn btn-primary btn-sm" type="button" id="digest-selected-button" disabled>Digest Selected</button>
+            <button class="btn btn-outline-primary btn-sm" type="button" id="digest-all-button">Digest All</button>
+            <button class="btn btn-outline-secondary btn-sm" type="button" id="archive-selected-button" disabled>Archive Selected</button>
+            <button class="btn btn-outline-secondary btn-sm" type="button" id="clear-selection-button" disabled>Clear Selection</button>
+          </div>
+          <div id="selection-status" class="text-secondary small text-lg-end">Select one or more raw ideas to digest a focused inventory slice.</div>
+        </div>
       </div>
       <div class="table-responsive">
         <table class="table inbox-table align-middle mb-0">
