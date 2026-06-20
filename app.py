@@ -37,6 +37,7 @@ ACTIVE_WORK_FILES = [
     {"title": "Dispatch", "path": "03-active-work/dispatch.md"},
     {"title": "Parking", "path": "03-active-work/parking.md"},
     {"title": "CY Storage", "path": "03-active-work/cy-storage.md"},
+    {"title": "Hiring", "path": "03-active-work/hiring.md"},
     {"title": "Worklog", "path": "03-active-work/worklog.md"},
 ]
 TOP_DASHBOARD_FILES = [
@@ -264,19 +265,60 @@ def _parse_key_value_metadata(markdown_text: str) -> dict[str, str]:
     return metadata
 
 
-def _summarize_active_work_file(relative_path: str, title: str) -> dict[str, object]:
+def _section_key_value_metadata(markdown_text: str, section_heading: str) -> dict[str, str]:
+    section_text = _extract_section_text(markdown_text, section_heading)
+    return _parse_key_value_metadata(section_text)
+
+
+def _normalize_percent(value: str | None) -> str:
+    if not value:
+        return ""
+    candidate = value.strip()
+    return candidate if re.fullmatch(r"\d{1,3}%?", candidate) else ""
+
+
+def _parse_active_work_file(relative_path: str, title: str) -> dict[str, object]:
     source_path = WORKLOG_ROOT / relative_path
     text = source_path.read_text(encoding="utf-8")
-    sprint_text = _extract_section_text(text, "Current Sprint / Focus")
+    current_sprint = _section_key_value_metadata(text, "Current Sprint")
+    legacy_current_focus = _extract_section_text(text, "Current Sprint / Focus")
+    if not current_sprint:
+        current_sprint = {}
+
+    last_sprint = _section_key_value_metadata(text, "Last Sprint")
+    next_sprint = _section_key_value_metadata(text, "Next Suggested Sprint")
     blockers_text = _extract_section_text(text, "Blockers")
     last_updated_text = _extract_section_text(text, "Last Updated")
     last_updated = _extract_first_value(last_updated_text) or _format_file_timestamp(source_path)
+    current_name = current_sprint.get("name") or current_sprint.get("focus") or current_sprint.get("objective") or ""
+    percent_complete = _normalize_percent(current_sprint.get("percent complete") or current_sprint.get("percent"))
+    status = (current_sprint.get("status") or "").strip().title()
+    if not current_name or status.lower() not in {"active", "planned", "paused", "stable", "blocked"}:
+        current_name = ""
+        percent_complete = ""
+        status = "Stable" if title in {"Core", "Unity", "Worklog"} else (status or "Stable")
+    sprint_notes = current_sprint.get("notes") or current_sprint.get("summary") or legacy_current_focus
+    last_sprint_name = last_sprint.get("name") or last_sprint.get("completed") or ""
+    next_sprint_name = next_sprint.get("name") or next_sprint.get("why") or ""
+    inbox_items = _related_inbox_items(title)
     return {
         "title": title,
         "path": relative_path,
-        "current_sprint_html": _render_markdown(sprint_text or "_No current sprint recorded._"),
+        "current_sprint_name": current_name,
+        "current_sprint_status": status,
+        "current_sprint_percent": percent_complete,
+        "current_sprint_notes": sprint_notes,
+        "last_sprint_name": last_sprint_name,
+        "last_sprint_completed": last_sprint.get("completed") or "",
+        "last_sprint_outcome": last_sprint.get("outcome") or "",
+        "next_suggested_sprint_name": next_sprint_name,
+        "next_suggested_sprint_why": next_sprint.get("why") or "",
+        "next_suggested_sprint_first_step": next_sprint.get("suggested_first_step") or "",
+        "current_sprint_html": _render_markdown(sprint_notes or "_No current sprint recorded._"),
         "blockers_count": _count_meaningful_bullets(blockers_text),
         "last_updated": last_updated,
+        "inbox_items": inbox_items,
+        "has_active_sprint": bool(current_name),
     }
 
 
@@ -375,6 +417,23 @@ def _all_structured_inbox_items() -> list[dict[str, str]]:
             items.append(_parse_structured_inbox_item(path))
     items.sort(key=lambda item: (item.get("mtime", 0), item["path"]), reverse=True)
     return items
+
+
+def _related_inbox_items(app_title: str) -> list[dict[str, str]]:
+    app_title_lower = app_title.lower()
+    matches = []
+    for item in _all_structured_inbox_items():
+        haystack = " ".join(
+            [
+                str(item.get("title", "")),
+                str(item.get("summary", "")),
+                str(item.get("app_project", "")),
+                str(item.get("type", "")),
+            ]
+        ).lower()
+        if app_title_lower in haystack:
+            matches.append(item)
+    return matches[:3]
 
 
 def _dashboard_intake_counts() -> dict[str, int]:
@@ -1197,65 +1256,15 @@ def inject_globals() -> dict[str, object]:
 @app.route("/")
 @_require_worklog_session
 def dashboard():
-    top_documents = _dashboard_documents()
-    portfolio_status = top_documents[0]
-    engineering_priorities = top_documents[1]
-    current_focus = top_documents[2]
-    next_actions = top_documents[3]
-    where_we_left_off = top_documents[4]
-    current_focus_summary = _extract_first_value(_extract_section_text(_read_markdown("00-dashboard/current-focus.md"), "Current Focus"))
-    next_action_summary = _extract_first_value(_extract_section_text(_read_markdown("00-dashboard/next-actions.md"), "Next Actions"))
-    blocker_text = _extract_section_text(_read_markdown("00-dashboard/blockers.md"), "Blockers")
-    latest_daily_log_path = _latest_daily_log() or "01-daily-logs/2026/06/2026-06-11.md"
-    latest_daily_log = {
-        "title": "Today’s Daily Log",
-        "path": latest_daily_log_path,
-        "html": _render_markdown(_read_markdown(latest_daily_log_path)),
-    }
-
-    active_work = [_summarize_active_work_file(item["path"], item["title"]) for item in ACTIVE_WORK_FILES]
+    app_cards = [_parse_active_work_file(item["path"], item["title"]) for item in ACTIVE_WORK_FILES]
     counts = _dashboard_counts()
     inbox_items = _recent_inbox_items()
-    intake_counts = _dashboard_intake_counts()
-    intake_items = _triage_items()
     update_shipments = _assistant_update_shipments()
-    plain_mode = _intake_plain_mode_enabled()
-    focus = _focus_summary()
-    today_focus = _today_focus_items()
-    blockers = _today_blockers()
-    triage_counts = {
-        "new": counts["open_new"],
-        "bugs": counts["open_bugs"],
-        "features": counts["open_features"],
-        "support": counts["open_support"],
-    }
-    secondary_nav = [
-        {"label": "Idea Inventory", "href": url_for("assistant")},
-        {"label": "Intake", "href": url_for("intake")},
-        {"label": "Inbox", "href": url_for("inbox")},
-    ]
 
     return render_template(
         "dashboard.html",
         counts=counts,
-        focus=focus,
-        current_focus_summary=current_focus_summary,
-        next_action_summary=next_action_summary,
-        blocker_text=blocker_text,
-        today_focus=today_focus,
-        blockers=blockers,
-        triage_counts=triage_counts,
-        intake_counts=intake_counts,
-        intake_items=intake_items,
-        plain_mode=plain_mode,
-        secondary_nav=secondary_nav,
-        portfolio_status=portfolio_status,
-        engineering_priorities=engineering_priorities,
-        current_focus=current_focus,
-        next_actions=next_actions,
-        where_we_left_off=where_we_left_off,
-        latest_daily_log=latest_daily_log,
-        active_work=active_work,
+        app_cards=app_cards,
         inbox_items=inbox_items,
         update_shipments=update_shipments,
     )
