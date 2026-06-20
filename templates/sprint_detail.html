@@ -74,9 +74,9 @@
               </tr>
             </thead>
             <tbody>
-              {% for thought in record.digested_source_thoughts or record.source_thoughts %}
+              {% for thought in record.source_thought_paths or record.digested_source_thoughts or record.source_thoughts %}
                 <tr>
-                  <td>{{ thought.split('/')[-1].replace('.md', '').replace('-', ' ').title() }}</td>
+                  <td>{{ record.source_thoughts[loop.index0] if record.source_thoughts and loop.index0 < record.source_thoughts|length else thought.split('/')[-1].replace('.md', '').replace('-', ' ').title() }}</td>
                   <td><a href="{{ url_for('view_file', relative_path=thought) }}">Open source thought</a></td>
                 </tr>
               {% else %}

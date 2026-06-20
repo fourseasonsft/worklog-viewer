@@ -124,6 +124,17 @@ class WorklogAssistantTests(unittest.TestCase):
         item = viewer_app._thought_box_items(digested_only=False)[0]
         self.assertRegex(item["created_display"], r"2026-06-20 \d{2}:\d{2}")
         self.assertNotIn("2026-06-20 10:00", item["display_snippet"])
+        self.assertEqual(item["raw_text_full"], "2026-06-20 10:00 Please tighten the IMS table.")
+
+    def test_thought_parser_reads_full_raw_text_and_normalizes_summary(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-worklog-filter.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: 2026 06 20 174635 On Worklog Inbox Sprint Queue Filters Should N\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Inbox filters.\n\n## Raw Thought\n2026 06 20 174635 On Worklog Inbox Sprint Queue Filters Should N\nselecting the filter should auto apply we only need a clear filter b\n",
+        )
+        item = viewer_app._thought_box_items(digested_only=False)[0]
+        self.assertEqual(item["raw_text_full"], "2026 06 20 174635 On Worklog Inbox Sprint Queue Filters Should N\nselecting the filter should auto apply we only need a clear filter b")
+        self.assertEqual(item["normalized_summary"], "Inbox and Sprint Queue filters should auto-apply when changed.")
+        self.assertIn("selecting the filter should auto apply", item["display_snippet"])
 
     def test_digest_preview_does_not_move_files(self) -> None:
         thought = self._write_thought(
@@ -223,8 +234,11 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("## Sprint Code", handoff_text)
         self.assertIn("## Completion Requirement", handoff_text)
         self.assertIn("## Codex/ChatGPT Starting Prompt", handoff_text)
-        self.assertIn("Sprint Code:", handoff_text)
         self.assertIn("## Source Ideas", handoff_text)
+        self.assertNotIn("100000-ims", handoff_text)
+        self.assertNotIn("100001-ims-2", handoff_text)
+        self.assertIn("IMS needs break bulk handling.", handoff_text)
+        self.assertIn("IMS needs a box-quantity sprint group.", handoff_text)
         sprint_handoff_files = [path for path in handoff_files if "# Sprint Handoff:" in path.read_text(encoding="utf-8")]
         self.assertTrue(sprint_handoff_files)
         self.assertTrue(list((self.root / "04-inbox/thought-box/digested").glob("*.md")))
@@ -323,6 +337,40 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("Proposed Work", detail_html)
         self.assertIn("Completion Requirement", detail_html)
         self.assertIn("Codex Prompt", detail_html)
+
+    def test_handoff_uses_normalized_summaries_and_full_proposed_work(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-worklog.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: On Worklog I want to get rid of all the inbox / new /bugs / features / support / closed\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Inbox navigation.\n",
+        )
+        self._write_thought(
+            "2026-06-20-100001-worklog-idea.md",
+            "# Worklog 2\n\n- created_at: 2026-06-20T10:00:01Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: For Worklog Active idea inventory area, Created should be short date and short time in PST. Raw thought doesn't need date / time.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Idea inventory readability.\n",
+        )
+        preview = self._client().post("/api/assistant/digest-preview", json={}).get_json()["digest_preview"]
+        response = self._client().post("/api/assistant/approve-digest", json={"digest_preview": preview})
+        self.assertEqual(response.status_code, 200)
+        handoff_file = next(path for path in (self.root / "05-sprint-handoffs").glob("*.md") if "# Sprint Handoff:" in path.read_text(encoding="utf-8"))
+        text = handoff_file.read_text(encoding="utf-8")
+        self.assertIn("Simplify the Inbox navigation and reduce visible category clutter.", text)
+        self.assertIn("Improve Idea Inventory table readability with short local timestamps and cleaner raw-thought text.", text)
+        self.assertNotIn("2026-06-20-100000-worklog", text)
+        self.assertNotIn("2026-06-20-100001-worklog-idea", text)
+        self.assertIn("Purpose", text)
+        self.assertIn("Completion Requirement", text)
+
+    def test_codex_prompt_uses_clean_summaries(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-worklog.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: 2026 06 20 174635 On Worklog Inbox Sprint Queue Filters Should N\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Inbox filters.\n\n## Raw Thought\n2026 06 20 174635 On Worklog Inbox Sprint Queue Filters Should N\nselecting the filter should auto apply we only need a clear filter b\n",
+        )
+        preview = self._client().post("/api/assistant/digest-preview", json={}).get_json()["digest_preview"]
+        prompt = preview["sprint_groups"][0]["starting_prompt"]
+        self.assertIn("Sprint Code:", prompt)
+        self.assertIn("Purpose:", prompt)
+        self.assertIn("Inbox and Sprint Queue filters should auto-apply when changed.", prompt)
+        self.assertNotIn("2026 06 20 174635", prompt)
+        self.assertNotIn("worklog-100000", prompt.lower())
 
     def test_handoff_includes_source_ideas_and_prompt(self) -> None:
         self._write_thought(

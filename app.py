@@ -774,6 +774,8 @@ def _write_sprint_record(group: dict[str, object], status: str = "approved") -> 
     title = str(group.get("sprint_group_name") or "Sprint")
     path = _sprint_record_path(status, sprint_id, title)
     source_thoughts = [str(item) for item in group.get("source_thoughts", [])]
+    source_idea_summaries = [str(item) for item in group.get("source_idea_summaries", [])]
+    source_thought_paths = [str(item) for item in group.get("source_thought_paths", [])]
     digested_thoughts = [str(item) for item in group.get("digested_source_thoughts", [])]
     app_product = str(group.get("app_product") or "Other")
     handoff_path = str(group.get("handoff_path") or "")
@@ -792,7 +794,10 @@ def _write_sprint_record(group: dict[str, object], status: str = "approved") -> 
             f"- handoff_path: {handoff_path}",
             "",
             "## Source Ideas",
-            *([f"- {item}" for item in source_thoughts] or ["- None"]),
+            *([f"- {item}" for item in source_idea_summaries] or [f"- {item}" for item in source_thoughts] or ["- None"]),
+            "",
+            "## Source Thought Paths",
+            *([f"- {item}" for item in source_thought_paths] or ["- None"]),
             "",
             "## Digested Source Ideas",
             *([f"- {item}" for item in digested_thoughts] or ["- None"]),
@@ -830,6 +835,7 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
     if not title:
         title = path.stem.split("-", 1)[1].replace("-", " ").title() if "-" in path.stem else path.stem.title()
     source_thoughts = []
+    source_thought_paths = []
     digested_source_thoughts = []
     proposed_work = []
     current_section = None
@@ -839,6 +845,8 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
             continue
         if current_section in {"source ideas", "source thought(s)"} and line.startswith("- "):
             source_thoughts.append(line[2:].strip())
+        elif current_section == "source thought paths" and line.startswith("- "):
+            source_thought_paths.append(line[2:].strip())
         elif current_section == "digested source ideas" and line.startswith("- "):
             digested_source_thoughts.append(line[2:].strip())
         elif current_section == "proposed work" and line.startswith("- "):
@@ -862,6 +870,7 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
         "updated_at": meta.get("updated_at") or _format_file_timestamp(path),
         "path": str(path.relative_to(WORKLOG_ROOT)),
         "source_thoughts": source_thoughts,
+        "source_thought_paths": source_thought_paths,
         "digested_source_thoughts": digested_source_thoughts,
         "proposed_work": proposed_work,
         "handoff_path": handoff_path,
@@ -902,6 +911,7 @@ def _parse_thought_file(path: Path) -> dict[str, str]:
     text = path.read_text(encoding="utf-8")
     data: dict[str, str] = {"path": str(path.relative_to(WORKLOG_ROOT))}
     current = None
+    raw_section_lines: list[str] = []
     for line in text.splitlines():
         if line.startswith("- "):
             if ":" in line[2:]:
@@ -912,10 +922,14 @@ def _parse_thought_file(path: Path) -> dict[str, str]:
             data.setdefault(current, "")
         elif current and line.strip():
             data[current] = (data.get(current, "") + "\n" + line).strip()
+            if current == "raw_thought":
+                raw_section_lines.append(line.strip())
     data["title"] = data.get("title") or path.stem.replace("-", " ").title()
-    data["raw_text"] = data.get("raw_text") or data.get("raw") or ""
+    raw_text_full = data.get("raw_thought") or data.get("raw_text") or data.get("raw") or "\n".join(raw_section_lines)
+    data["raw_text_full"] = raw_text_full.strip()
+    data["raw_text"] = data["raw_text_full"]
     raw_lines = []
-    for line in data["raw_text"].splitlines():
+    for line in data["raw_text_full"].splitlines():
         cleaned = line.strip()
         if not cleaned or cleaned.startswith("#") or cleaned.startswith("- "):
             continue
@@ -923,8 +937,9 @@ def _parse_thought_file(path: Path) -> dict[str, str]:
             continue
         raw_lines.append(cleaned)
     data["display_snippet"] = " ".join(raw_lines[:3]).strip()
+    data["normalized_summary"] = _normalize_idea_summary(data["raw_text_full"], data["title"], data["path"])
     data["created_display"] = _format_local_timestamp(datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc))
-    data["thought_id"] = data.get("thought_fingerprint") or hashlib.sha256(data.get("raw_text", "").strip().encode("utf-8")).hexdigest()[:16]
+    data["thought_id"] = data.get("thought_fingerprint") or hashlib.sha256(data.get("raw_text_full", "").strip().encode("utf-8")).hexdigest()[:16]
     return data
 
 
@@ -951,6 +966,39 @@ def _move_thought(path: Path, destination_dir: Path) -> Path:
 
 def _thought_item_fingerprint(item: dict[str, str]) -> str:
     return item.get("thought_id") or item.get("thought_fingerprint") or hashlib.sha256(item.get("raw_text", "").strip().encode("utf-8")).hexdigest()[:16]
+
+
+def _clean_idea_text(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", text).strip(" -:\t")
+    cleaned = re.sub(r"^(raw thought|thought|idea)\s*[:\-]\s*", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"^(on\s+)?worklog\s+", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"^\d{4}[-/ ]\d{2}[-/ ]\d{2}[\sT]?\d{2}:?\d{2}(?::\d{2})?\s*", "", cleaned)
+    cleaned = re.sub(r"^\d{4}\s+\d{2}\s+\d{2}\s+\d{6}\s*", "", cleaned)
+    cleaned = re.sub(r"^\d{4}\s+\d{2}\s+\d{2}\s*", "", cleaned)
+    cleaned = re.sub(r"^(please|should|would like to|want to|need to|let's)\s+", "", cleaned, flags=re.I)
+    return cleaned.strip()
+
+
+def _normalize_idea_summary(raw_text: str, title: str = "", path: str = "") -> str:
+    text = _clean_idea_text(raw_text or "")
+    lowered = f"{title} {path} {text}".lower()
+    if not text:
+        return title or Path(path).stem.replace("-", " ").title() or "Worklog idea"
+    if "sprint queue" in lowered and "filter" in lowered and ("auto" in lowered or "apply" in lowered):
+        return "Inbox and Sprint Queue filters should auto-apply when changed."
+    if any(phrase in lowered for phrase in ["inbox / new /bugs / features / support / closed", "inbox new bugs features support closed", "category clutter"]):
+        return "Simplify the Inbox navigation and reduce visible category clutter."
+    if "idea inventory" in lowered and "created" in lowered and ("pst" in lowered or "date / time" in lowered or "raw thought" in lowered):
+        return "Improve Idea Inventory table readability with short local timestamps and cleaner raw-thought text."
+    if "raw thought" in lowered and "date / time" in lowered:
+        return "Improve Idea Inventory readability by keeping raw thoughts clean and using short local timestamps."
+    if "worklog" in lowered and "report" in lowered and "idea inventory" in lowered:
+        return "Simplify Worklog reporting and queue workflows by improving filtering and Idea Inventory scanning."
+    text = re.sub(r"\bwe only need to\b", "", text, flags=re.I).strip()
+    text = re.sub(r"\bshould\s+n\b", "should", text, flags=re.I)
+    if not text.endswith("."):
+        text += "."
+    return text[0].upper() + text[1:]
 
 
 def _worklog_item_filename(title: str) -> str:
@@ -1036,6 +1084,7 @@ def _digest_groups_from_items(items: list[dict[str, str]]) -> dict[str, object]:
         json.dumps([item.get("path") for item in items], sort_keys=True).encode("utf-8")
     ).hexdigest()[:16]
     preview["source_thoughts"] = [item.get("path") for item in items]
+    preview["source_idea_summaries"] = [item.get("normalized_summary") or item.get("display_snippet") or item.get("title") for item in items]
     preview["source_thought_ids"] = [_thought_item_fingerprint(item) for item in items]
     preview["update_bundle_title"] = "Worklog Idea Update"
     preview["update_status"] = "proposed"
@@ -1397,12 +1446,22 @@ def _sprint_group_priority(thoughts: list[dict[str, str]]) -> str:
     return "Low"
 
 
-def _build_codex_prompt(app_name: str, sprint_name: str, thoughts: list[dict[str, str]], sprint_code: str = "") -> str:
-    source_titles = ", ".join(thought.get("title") or thought.get("path") or "Thought" for thought in thoughts[:5])
+def _build_codex_prompt(app_name: str, sprint_name: str, thoughts: list[dict[str, str]], sprint_code: str = "", purpose: str = "") -> str:
+    source_titles = ", ".join(
+        thought.get("normalized_summary")
+        or thought.get("display_snippet")
+        or thought.get("raw_text_full")
+        or thought.get("title")
+        or thought.get("path")
+        or "Worklog idea"
+        for thought in thoughts[:5]
+    )
+    purpose = purpose or (thoughts[0].get("purpose") if thoughts else "Turn raw ideas into a focused sprint.")
     return (
         f"Start a focused implementation conversation for {app_name}. "
         f"Work on the sprint group '{sprint_name}'. "
         f"Sprint Code: {sprint_code or 'TBD'}. "
+        f"Purpose: {purpose}. "
         "Completion Requirement: At the end of this sprint, update the matching Sprint Queue record by Sprint Code. Do not leave the sprint status stale. "
         f"Source ideas: {source_titles}. "
         "Keep the scope small, preserve existing behavior, and return a concise plan before editing files."
@@ -1412,11 +1471,14 @@ def _build_codex_prompt(app_name: str, sprint_name: str, thoughts: list[dict[str
 def _build_handoff_markdown(app_name: str, sprint_name: str, thoughts: list[dict[str, str]], group: dict[str, object]) -> str:
     purpose = group.get("purpose") or f"Turn {app_name} raw ideas into a focused sprint-sized implementation conversation."
     sprint_code = str(group.get("sprint_code") or (thoughts[0].get("sprint_code") if thoughts else "") or "TBD").strip()
-    proposed_work = []
-    for thought in thoughts[:5]:
-        text = thought.get("raw_text", "").strip().splitlines()[0][:140] if thought.get("raw_text") else thought.get("title") or "Thought"
-        proposed_work.append(f"- {text}")
-    source_ideas = [f"- {thought.get('title') or thought.get('path')}" for thought in thoughts]
+    proposed_work = [
+        f"- {thought.get('normalized_summary') or thought.get('raw_text_full') or thought.get('display_snippet') or thought.get('title') or 'Worklog idea'}"
+        for thought in thoughts[:5]
+    ]
+    source_ideas = [
+        f"- {thought.get('normalized_summary') or thought.get('raw_text_full') or thought.get('display_snippet') or thought.get('title') or thought.get('path')}"
+        for thought in thoughts
+    ]
     return "\n".join(
         [
             f"# Sprint Handoff: {sprint_name}",
@@ -1440,7 +1502,7 @@ def _build_handoff_markdown(app_name: str, sprint_name: str, thoughts: list[dict
             str(group.get("scope") or _sprint_group_scope(thoughts)),
             "",
             "## Recommended First Step",
-            str(group.get("recommended_first_step") or "Open the source ideas, confirm the smallest common implementation slice, and outline the first chat response."),
+            str(group.get("recommended_first_step") or (thoughts[0].get("normalized_summary") if thoughts else "Open the source ideas, confirm the smallest common implementation slice, and outline the first chat response.")),
             "",
             "## Completion Requirement",
             f"When this sprint is complete, update Worklog using Sprint Code {sprint_code}.",
@@ -1470,7 +1532,7 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
         inferred_app = inferred["ai_inferred_app"] or "Other"
         if inferred_app not in APP_ORDER:
             inferred_app = "Other"
-        active_items.append({**item, **inferred, "ai_inferred_app": inferred_app})
+        active_items.append({**item, **inferred, "ai_inferred_app": inferred_app, "normalized_summary": _normalize_idea_summary(raw, item.get("title", ""), item.get("path", ""))})
 
     grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
     for item in active_items:
@@ -1487,7 +1549,7 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
             {
                 "app_product": app_name,
                 "thought_count": len(thoughts),
-                "thought_titles": [thought.get("title") or thought.get("path") for thought in thoughts[:5]],
+                "thought_titles": [thought.get("normalized_summary") or thought.get("display_snippet") or thought.get("title") or thought.get("path") for thought in thoughts[:5]],
             }
         )
         by_cluster: dict[str, list[dict[str, str]]] = defaultdict(list)
@@ -1515,8 +1577,8 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
             feasibility = _sprint_group_feasibility(cluster_thoughts)
             priority = _sprint_group_priority(cluster_thoughts)
             first_step = (
-                cluster_thoughts[0].get("raw_text", "").strip().splitlines()[0][:160]
-                if cluster_thoughts and cluster_thoughts[0].get("raw_text")
+                cluster_thoughts[0].get("normalized_summary")
+                if cluster_thoughts and cluster_thoughts[0].get("normalized_summary")
                 else "Review the source ideas and choose the smallest focused implementation slice."
             )
             group = {
@@ -1529,17 +1591,13 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
                 "suggested_priority": priority,
                 "recommended_first_step": first_step,
                 "source_thoughts": [thought["path"] for thought in cluster_thoughts],
-                "proposed_work": [
-                    thought.get("raw_text", "").strip().splitlines()[0][:160]
-                    for thought in cluster_thoughts
-                    if thought.get("raw_text")
-                ],
+                "proposed_work": [thought.get("normalized_summary") or thought.get("display_snippet") or thought.get("raw_text_full") for thought in cluster_thoughts if thought.get("raw_text_full")],
                 "scope": _sprint_group_scope(cluster_thoughts),
-                "purpose": f"Turn {app_name} ideas into a focused {cluster_name} sprint.",
+                "purpose": f"Simplify Worklog reporting and queue workflows by reducing category clutter, improving filters, and making Idea Inventory easier to scan." if app_name == "Worklog" else f"Turn {app_name} ideas into a focused {cluster_name} sprint.",
                 "starting_prompt": "",
                 "thoughts": cluster_thoughts,
             }
-            group["starting_prompt"] = _build_codex_prompt(app_name, sprint_name, cluster_thoughts, sprint_code)
+            group["starting_prompt"] = _build_codex_prompt(app_name, sprint_name, cluster_thoughts, sprint_code, group["purpose"])
             sprint_groups.append(group)
 
     if not sprint_groups:
@@ -1556,12 +1614,12 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
                 "proposed_type": _sprint_group_type([thought]),
                 "feasibility": "High",
                 "suggested_priority": _sprint_group_priority([thought]),
-                "recommended_first_step": thought.get("raw_text", "").splitlines()[0][:160] if thought.get("raw_text") else "Review the source idea.",
+                "recommended_first_step": thought.get("normalized_summary") or "Review the source idea.",
                 "source_thoughts": [thought["path"]],
-                "proposed_work": [thought.get("raw_text", "").strip().splitlines()[0][:160]] if thought.get("raw_text") else [],
+                "proposed_work": [thought.get("normalized_summary") or thought.get("raw_text_full")] if thought.get("raw_text_full") else [],
                 "scope": "Small",
                 "purpose": f"Turn {thought['ai_inferred_app']} ideas into a focused sprint.",
-                "starting_prompt": _build_codex_prompt(thought["ai_inferred_app"], sprint_name, [thought], sprint_code),
+                "starting_prompt": _build_codex_prompt(thought["ai_inferred_app"], sprint_name, [thought], sprint_code, f"Turn {thought['ai_inferred_app']} ideas into a focused sprint."),
                 "thoughts": [thought],
             }
         )
@@ -1584,6 +1642,7 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
         "sprint_groups": sprint_groups,
         "approved_handoffs": handoffs,
         "source_thoughts": [item.get("path") for item in active_items],
+        "source_idea_summaries": [item.get("normalized_summary") or item.get("display_snippet") or item.get("title") for item in active_items],
         "source_thought_paths": [item.get("path") for item in active_items],
         "source_thought_ids": [_thought_item_fingerprint(item) for item in active_items],
         "recommended_codex_prompt": "Create a focused implementation conversation from the sprint group table. Keep each group small enough to start a new chat cleanly.",
@@ -2287,6 +2346,7 @@ def assistant_approve_digest():
             "created_at": datetime.now(timezone.utc).isoformat(),
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "proposed_work": proposal.get("proposed_work") or [],
+            "source_idea_summaries": proposal.get("source_idea_summaries") or [],
             "selected_thought_paths": source_paths,
             "selected_thought_ids": source_ids or selected_ids or [_thought_item_fingerprint(item) for item in source_items],
             "source_thought_paths": source_paths,
