@@ -49,6 +49,7 @@ TOP_DASHBOARD_FILES = [
 ]
 INBOX_FOLDERS = ["new", "bugs", "features", "support"]
 THOUGHT_BOX_DIR = WORKLOG_ROOT / "04-inbox/thought-box"
+SPRINT_HANDOFFS_DIR = WORKLOG_ROOT / "05-sprint-handoffs"
 INTAKE_TYPE_BUCKETS = {
     "bug": "bugs",
     "feature": "features",
@@ -68,6 +69,7 @@ APP_FILTERS = {
     "hiring": "Hiring",
     "worklog": "Worklog",
 }
+APP_ORDER = ["Core", "Unity", "IMS", "CY Storage", "Dispatch", "Parking", "Hiring", "Worklog", "Other"]
 INBOX_TYPES = {
     "all",
     "new",
@@ -662,6 +664,26 @@ def _assistant_update_shipments_dir() -> Path:
     return WORKLOG_ROOT / "05-release-notes/assistant-update-shipments"
 
 
+def _sprint_handoffs_dir() -> Path:
+    return SPRINT_HANDOFFS_DIR
+
+
+def _write_sprint_handoff_file(group: dict[str, object]) -> Path:
+    _sprint_handoffs_dir().mkdir(parents=True, exist_ok=True)
+    title = str(group.get("sprint_group_name") or "Sprint Handoff")
+    path = _sprint_handoffs_dir() / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H%M%S')}-{_slugify_title(title)}.md"
+    path.write_text(
+        _build_handoff_markdown(
+            str(group.get("app_product") or "Worklog"),
+            title,
+            group.get("thoughts") or [],
+            group,
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _slugify_title(value: str) -> str:
     value = value.lower()
     value = re.sub(r"[^a-z0-9]+", "-", value)
@@ -1009,90 +1031,230 @@ def _infer_thought(raw_text: str) -> dict[str, str]:
     }
 
 
-def _digest_preview(items: list[dict[str, str]]) -> dict[str, object]:
-    openai_preview = _call_openai_digest(items)
-    if openai_preview:
-        openai_preview["kb_context_excerpt"] = _kb_reference_text()[:6000]
-        return openai_preview
-    grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
+def _sprint_group_name(app_name: str, thoughts: list[dict[str, str]]) -> str:
+    keywords = " ".join(thought.get("raw_text", "") for thought in thoughts).lower()
+    if any(token in keywords for token in ["ui", "layout", "design", "copy", "dashboard"]):
+        focus = "UI cleanup"
+    elif any(token in keywords for token in ["import", "ingest", "capture", "webhook"]):
+        focus = "intake flow"
+    elif any(token in keywords for token in ["report", "summary", "log", "table"]):
+        focus = "reporting"
+    elif any(token in keywords for token in ["approval", "status", "workflow", "routing"]):
+        focus = "workflow"
+    elif any(token in keywords for token in ["bug", "error", "fail", "broken"]):
+        focus = "bug fix"
+    else:
+        focus = "follow-up"
+    return f"{app_name} {focus}".strip()
+
+
+def _sprint_group_type(thoughts: list[dict[str, str]]) -> str:
+    types = [thought.get("ai_inferred_type") or "thought" for thought in thoughts]
+    if "feature" in types:
+        return "Feature"
+    if "bug" in types:
+        return "Bug Fix"
+    if "support" in types:
+        return "Support"
+    return "Mixed Follow-Up"
+
+
+def _sprint_group_feasibility(thoughts: list[dict[str, str]]) -> str:
+    if len(thoughts) <= 2:
+        return "High"
+    if len(thoughts) <= 4:
+        return "Medium"
+    return "Lower"
+
+
+def _sprint_group_scope(thoughts: list[dict[str, str]]) -> str:
+    if len(thoughts) <= 2:
+        return "Small"
+    if len(thoughts) <= 4:
+        return "Medium"
+    return "Large"
+
+
+def _sprint_group_priority(thoughts: list[dict[str, str]]) -> str:
+    types = [thought.get("ai_inferred_type") or "thought" for thought in thoughts]
+    if "bug" in types:
+        return "High"
+    if "feature" in types:
+        return "Medium"
+    if "support" in types:
+        return "Medium"
+    return "Low"
+
+
+def _build_codex_prompt(app_name: str, sprint_name: str, thoughts: list[dict[str, str]]) -> str:
+    source_titles = ", ".join(thought.get("title") or thought.get("path") or "Thought" for thought in thoughts[:5])
+    return (
+        f"Start a focused implementation conversation for {app_name}. "
+        f"Work on the sprint group '{sprint_name}'. "
+        f"Source ideas: {source_titles}. "
+        "Keep the scope small, preserve existing behavior, and return a concise plan before editing files."
+    )
+
+
+def _build_handoff_markdown(app_name: str, sprint_name: str, thoughts: list[dict[str, str]], group: dict[str, object]) -> str:
+    purpose = group.get("purpose") or f"Turn {app_name} raw ideas into a focused sprint-sized implementation conversation."
+    proposed_work = []
+    for thought in thoughts[:5]:
+        text = thought.get("raw_text", "").strip().splitlines()[0][:140] if thought.get("raw_text") else thought.get("title") or "Thought"
+        proposed_work.append(f"- {text}")
+    source_ideas = [f"- {thought.get('title') or thought.get('path')}" for thought in thoughts]
+    return "\n".join(
+        [
+            f"# Sprint Handoff: {sprint_name}",
+            "",
+            f"## App/Product",
+            app_name,
+            "",
+            "## Purpose",
+            purpose,
+            "",
+            "## Source Ideas",
+            *source_ideas,
+            "",
+            "## Proposed Work",
+            *(proposed_work or ["- Triage raw ideas into a focused implementation plan."]),
+            "",
+            "## Suggested Scope",
+            str(group.get("scope") or _sprint_group_scope(thoughts)),
+            "",
+            "## Recommended First Step",
+            str(group.get("recommended_first_step") or "Open the source ideas, confirm the smallest common implementation slice, and outline the first chat response."),
+            "",
+            "## Codex/ChatGPT Starting Prompt",
+            str(group.get("starting_prompt") or _build_codex_prompt(app_name, sprint_name, thoughts)),
+            "",
+        ]
+    )
+
+
+def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object]:
+    if not items:
+        return {
+            "plain_summary": "No active raw ideas to digest.",
+            "active_items": [],
+            "app_groups": [],
+            "sprint_groups": [],
+            "approved_handoffs": [],
+            "recommended_codex_prompt": "No active raw ideas available.",
+        }
+
+    active_items = []
     for item in items:
         raw = item.get("raw_text", "")
         inferred = _infer_thought(raw)
-        key = inferred["ai_inferred_app"] or "Unclear"
-        grouped[key].append({**item, **inferred})
+        inferred_app = inferred["ai_inferred_app"] or "Other"
+        if inferred_app not in APP_ORDER:
+            inferred_app = "Other"
+        active_items.append({**item, **inferred, "ai_inferred_app": inferred_app})
 
-    proposed_items: list[dict[str, object]] = []
-    for app_name, group in grouped.items():
-        by_type: dict[str, list[dict[str, str]]] = defaultdict(list)
-        for thought in group:
-            by_type[thought.get("ai_inferred_type") or "thought"].append(thought)
-        for inferred_type, thoughts in by_type.items():
-            if inferred_type == "thought" and len(thoughts) == 1:
-                continue
-            source_refs = [thought["path"] for thought in thoughts]
-            combined_text = " ".join(thought.get("raw_text", "") for thought in thoughts).strip()
-            title = f"{app_name} {inferred_type.title()} follow-up".strip()
-            destination = {
-                "bug": "04-inbox/bugs",
-                "feature": "04-inbox/features",
-                "support": "04-inbox/support",
-                "blocker": "04-inbox/new",
-                "thought": "04-inbox/new",
-            }.get(inferred_type, "04-inbox/new")
-            priority = "high" if inferred_type in {"bug", "blocker"} else "medium"
-            proposed_items.append(
-                {
-                    "title": title,
-                    "destination_folder": destination,
-                    "type": inferred_type if inferred_type in {"bug", "feature", "support"} else "note",
-                    "app_project": app_name or "worklog",
-                    "priority": priority,
-                    "plain_english_summary": combined_text[:240] or title,
-                    "suggested_next_action": f"Review the {app_name or 'Worklog'} thought(s) and convert into a tracked item.",
-                    "source_thoughts": source_refs,
-                }
+    grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for item in active_items:
+        grouped[item["ai_inferred_app"] or "Other"].append(item)
+
+    app_groups = []
+    sprint_groups = []
+    for app_name in APP_ORDER:
+        thoughts = grouped.get(app_name, [])
+        if not thoughts:
+            continue
+        app_groups.append(
+            {
+                "app_product": app_name,
+                "thought_count": len(thoughts),
+                "thought_titles": [thought.get("title") or thought.get("path") for thought in thoughts[:5]],
+            }
+        )
+        by_cluster: dict[str, list[dict[str, str]]] = defaultdict(list)
+        for thought in thoughts:
+            cluster_key = thought.get("ai_inferred_type") or "thought"
+            bucket = "workflow"
+            raw = thought.get("raw_text", "").lower()
+            if any(token in raw for token in ["ui", "layout", "design", "copy", "dashboard"]):
+                bucket = "ui"
+            elif any(token in raw for token in ["import", "ingest", "capture", "webhook"]):
+                bucket = "intake"
+            elif any(token in raw for token in ["report", "summary", "log", "table"]):
+                bucket = "reporting"
+            elif any(token in raw for token in ["approval", "status", "workflow", "routing"]):
+                bucket = "workflow"
+            elif cluster_key == "bug":
+                bucket = "bug"
+            by_cluster[bucket].append(thought)
+
+        for cluster_name, cluster_thoughts in by_cluster.items():
+            sprint_name = _sprint_group_name(app_name, cluster_thoughts)
+            proposed_type = _sprint_group_type(cluster_thoughts)
+            feasibility = _sprint_group_feasibility(cluster_thoughts)
+            priority = _sprint_group_priority(cluster_thoughts)
+            first_step = (
+                cluster_thoughts[0].get("raw_text", "").strip().splitlines()[0][:160]
+                if cluster_thoughts and cluster_thoughts[0].get("raw_text")
+                else "Review the source ideas and choose the smallest focused implementation slice."
             )
+            group = {
+                "app_product": app_name,
+                "sprint_group_name": sprint_name,
+                "ideas_included": len(cluster_thoughts),
+                "proposed_type": proposed_type,
+                "feasibility": feasibility,
+                "suggested_priority": priority,
+                "recommended_first_step": first_step,
+                "source_thoughts": [thought["path"] for thought in cluster_thoughts],
+                "scope": _sprint_group_scope(cluster_thoughts),
+                "purpose": f"Turn {app_name} ideas into a focused {cluster_name} sprint.",
+                "starting_prompt": _build_codex_prompt(app_name, sprint_name, cluster_thoughts),
+                "thoughts": cluster_thoughts,
+            }
+            sprint_groups.append(group)
 
-    if not proposed_items:
-        for item in items:
-            raw = item.get("raw_text", "")
-            inferred = _infer_thought(raw)
-            proposed_items.append(
-                {
-                    "title": (inferred["ai_inferred_app"] or "Worklog") + " follow-up",
-                    "destination_folder": {
-                        "bug": "04-inbox/bugs",
-                        "feature": "04-inbox/features",
-                        "support": "04-inbox/support",
-                        "blocker": "04-inbox/new",
-                    }.get(inferred["ai_inferred_type"], "04-inbox/new"),
-                    "type": inferred["ai_inferred_type"] if inferred["ai_inferred_type"] in {"bug", "feature", "support"} else "note",
-                    "app_project": inferred["ai_inferred_app"] or "worklog",
-                    "priority": "medium",
-                    "plain_english_summary": raw[:240],
-                    "suggested_next_action": "Review this thought and decide whether it should become a Worklog item.",
-                    "source_thoughts": [item.get("path", "")],
-                }
-            )
+    if not sprint_groups:
+        thought = active_items[0]
+        sprint_name = _sprint_group_name(thought["ai_inferred_app"], [thought])
+        sprint_groups.append(
+            {
+                "app_product": thought["ai_inferred_app"],
+                "sprint_group_name": sprint_name,
+                "ideas_included": 1,
+                "proposed_type": _sprint_group_type([thought]),
+                "feasibility": "High",
+                "suggested_priority": _sprint_group_priority([thought]),
+                "recommended_first_step": thought.get("raw_text", "").splitlines()[0][:160] if thought.get("raw_text") else "Review the source idea.",
+                "source_thoughts": [thought["path"]],
+                "scope": "Small",
+                "purpose": f"Turn {thought['ai_inferred_app']} ideas into a focused sprint.",
+                "starting_prompt": _build_codex_prompt(thought["ai_inferred_app"], sprint_name, [thought]),
+                "thoughts": [thought],
+            }
+        )
 
-    prompt = "\n".join(
-        [
-            "You are the FSFT Worklog Assistant.",
-            "Use Worklog and KB context only.",
-            "Convert the thoughts into concrete Worklog inbox suggestions and a Codex prompt.",
-            "Do not move files in preview mode.",
-        ]
-    )
+    handoffs = []
+    for group in sprint_groups:
+        handoffs.append(
+            {
+                "app_product": group["app_product"],
+                "sprint_group_name": group["sprint_group_name"],
+                "handoff_md": _build_handoff_markdown(group["app_product"], group["sprint_group_name"], group["thoughts"], group),
+                "source_thoughts": group["source_thoughts"],
+            }
+        )
+
     return {
-        "plain_summary": f"{len(items)} undigested thought item(s) ready for review.",
-        "grouped_by_app": {app: len(thoughts) for app, thoughts in grouped.items()},
-        "likely_bugs": [item["plain_english_summary"] for item in proposed_items if item["type"] == "bug"][:5],
-        "likely_features": [item["plain_english_summary"] for item in proposed_items if item["type"] == "feature"][:5],
-        "likely_blockers": [item["plain_english_summary"] for item in proposed_items if item["destination_folder"] == "04-inbox/new" and item["priority"] == "high"][:5],
-        "proposed_items": proposed_items,
-        "recommended_codex_prompt": prompt,
-        "kb_context_excerpt": _kb_reference_text()[:6000],
+        "plain_summary": f"{len(active_items)} active raw thought item(s) grouped into {len(app_groups)} app bucket(s) and {len(sprint_groups)} sprint group(s).",
+        "active_items": active_items,
+        "app_groups": app_groups,
+        "sprint_groups": sprint_groups,
+        "approved_handoffs": handoffs,
+        "recommended_codex_prompt": "Create a focused implementation conversation from the sprint group table. Keep each group small enough to start a new chat cleanly.",
     }
+
+
+def _digest_preview(items: list[dict[str, str]]) -> dict[str, object]:
+    return _group_thoughts_for_sprints(items)
 
 
 def _dashboard_documents() -> list[dict[str, object]]:
@@ -1580,11 +1742,11 @@ def assistant_message():
     message = (payload.get("message") or "").strip()
     if not message:
         return {"error": "message is required"}, 400
-    if message.lower() in {"digest my thought box", "digest idea inventory", "digest idea orders"}:
+    if message.lower() in {"digest my thought box", "digest idea inventory", "digest idea orders", "digest sprint groups"}:
         preview = _digest_groups_from_items(_thought_box_items(digested_only=False))
         return {
             "ok": True,
-            "assistant_reply": "Proposed update review prepared. Review the proposal before approving.",
+            "assistant_reply": "Sprint groups prepared. Review the tables before approving.",
             "digest_preview": preview,
             "created_raw_thought": False,
         }
@@ -1628,9 +1790,9 @@ def assistant_approve_digest():
         return {"ok": False, "error": "No active thoughts available for approval."}, 400
 
     by_path = {item["path"]: item for item in thoughts}
-    created_items: list[str] = []
     moved_paths: list[str] = []
-    for proposal in preview.get("proposed_items", []):
+    created_handoffs: list[str] = []
+    for proposal in preview.get("sprint_groups", []):
         proposal_paths = [str(path) for path in proposal.get("source_thoughts", [])]
         active_thoughts = [by_path[path] for path in proposal_paths if path in by_path]
         if not active_thoughts:
@@ -1638,10 +1800,8 @@ def assistant_approve_digest():
         fingerprints = {_thought_item_fingerprint(item) for item in active_thoughts}
         if len(fingerprints) == 0:
             continue
-        if proposal.get("destination_folder") == "04-inbox/thought-box/digested":
-            continue
-        worklog_path = _create_worklog_item_from_proposal(proposal)
-        created_items.append(str(worklog_path.relative_to(WORKLOG_ROOT)))
+        handoff_path = _write_sprint_handoff_file(proposal)
+        created_handoffs.append(str(handoff_path.relative_to(WORKLOG_ROOT)))
         for thought in active_thoughts:
             source_file = WORKLOG_ROOT / thought["path"]
             if not source_file.exists():
@@ -1649,8 +1809,8 @@ def assistant_approve_digest():
             destination = _move_thought(source_file, _thought_digested_dir())
             moved_paths.append(str(destination.relative_to(WORKLOG_ROOT)))
 
-    record_path = THOUGHT_BOX_DIR / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H%M%S')}-digest-record.md"
-    created_lines = [f"- {item}" for item in created_items] or ["- None"]
+    record_path = _sprint_handoffs_dir() / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H%M%S')}-digest-record.md"
+    created_lines = [f"- {item}" for item in created_handoffs] or ["- None"]
     moved_lines = [f"- {item}" for item in moved_paths] or ["- None"]
     record_path.write_text(
         "\n".join(
@@ -1659,9 +1819,9 @@ def assistant_approve_digest():
                 "",
                 f"- created_at: {datetime.now(timezone.utc).isoformat()}",
                 f"- source_count: {len(thoughts)}",
-                f"- created_items: {len(created_items)}",
+                f"- created_handoffs: {len(created_handoffs)}",
                 "",
-                "## Created Worklog Items",
+                "## Created Sprint Handoffs",
                 *created_lines,
                 "",
                 "## Moved Thought Files",
@@ -1672,14 +1832,11 @@ def assistant_approve_digest():
         encoding="utf-8",
     )
 
-    update_record = _write_update_shipment_record(preview, created_items, moved_paths)
-
     return {
         "ok": True,
-        "created_items": created_items,
+        "created_handoffs": created_handoffs,
         "moved_thoughts": moved_paths,
-        "update_shipment": str(update_record.relative_to(WORKLOG_ROOT)),
-        "assistant_reply": "Update approved. Routed items were created and raw ideas were moved to digested.",
+        "assistant_reply": "Sprint handoffs approved. Handoff markdown files were created and raw ideas were moved to digested.",
     }
 
 

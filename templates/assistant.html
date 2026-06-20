@@ -5,8 +5,8 @@
     <div class="card-body p-4 p-xl-5 d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-lg-start">
       <div class="hero-copy">
         <div class="eyebrow text-uppercase text-secondary small fw-semibold mb-2">Idea Inventory</div>
-        <h1 class="h2 mb-2">Capture ideas, digest them, and approve routed updates</h1>
-        <p class="text-secondary mb-0">Worklog is IMS for David's brain. Raw ideas stay in inventory until the Proposed Update Review is approved.</p>
+        <h1 class="h2 mb-2">Idea Inventory digest to sprint groups</h1>
+        <p class="text-secondary mb-0">Raw ideas stay in inventory until David approves sprint handoffs. Digest first groups by app/product, then by feasible sprint slices.</p>
       </div>
       <div class="d-flex flex-column gap-2 align-items-lg-end">
         <div class="badge {% if openai_enabled %}text-bg-success{% else %}text-bg-warning{% endif %} align-self-start align-self-lg-end">
@@ -15,7 +15,7 @@
         <div class="d-flex flex-wrap gap-2 justify-content-lg-end">
           <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('dashboard') }}">Dashboard</a>
           <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('intake') }}">Structured Intake</a>
-          <button class="btn btn-primary btn-sm" type="button" id="proposed-update-button">Proposed Update Review</button>
+          <button class="btn btn-primary btn-sm" type="button" id="proposed-update-button">Digest Sprint Groups</button>
         </div>
       </div>
     </div>
@@ -28,7 +28,7 @@
           <div>
             <div class="text-uppercase text-secondary small fw-semibold mb-2">Capture</div>
             <h2 class="h4 mb-1">One clear capture input</h2>
-            <div class="text-secondary">Use this for fast raw ideas before they become structured work items.</div>
+            <div class="text-secondary">Use this for fast raw ideas before they are grouped into sprint handoffs.</div>
           </div>
         </div>
         <textarea class="form-control assistant-input mb-3" rows="5" name="message" placeholder="Need to fix intake copy for IMS and simplify the update flow"></textarea>
@@ -40,123 +40,157 @@
     </div>
   </section>
 
-  <section class="row g-4">
+  <section class="card surface-card card-shadow border-0 mb-4">
+    <div class="card-body p-4 p-xl-5">
+      <div class="d-flex justify-content-between align-items-end gap-3 mb-3">
+        <div>
+          <div class="text-uppercase text-secondary small fw-semibold mb-2">Active Idea Inventory</div>
+          <h2 class="h3 mb-1">Raw ideas waiting in inventory</h2>
+          <div class="text-secondary">Ideas stay here until David approves sprint handoffs.</div>
+        </div>
+        <div class="text-secondary small">{{ idea_inventory_count }} active raw idea{{ '' if idea_inventory_count == 1 else 's' }}</div>
+      </div>
+      <div class="table-responsive">
+        <table class="table inbox-table align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Created</th>
+              <th>Raw Thought</th>
+              <th>Inferred App/Product</th>
+              <th>Digest Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="idea-inventory-body">
+            {% if conversation %}
+              {% for item in conversation %}
+                <tr data-thought-path="{{ item.path }}">
+                  <td class="text-nowrap">{{ item.created_at or item.mtime_display or 'Unknown' }}</td>
+                  <td>
+                    <div class="fw-semibold">{{ item.title }}</div>
+                    <div class="text-secondary small">{{ item.raw_text[:180] if item.raw_text else 'No raw text recorded.' }}</div>
+                  </td>
+                  <td>
+                    <span class="badge text-bg-light border">{{ item.ai_inferred_app or 'Other' }}</span>
+                  </td>
+                  <td>
+                    <span class="badge {% if item.digest_status == 'not_digested' %}text-bg-warning{% else %}text-bg-success{% endif %}">
+                      {{ item.digest_status or 'not_digested' }}
+                    </span>
+                  </td>
+                  <td>
+                    <div class="d-flex flex-wrap gap-2">
+                      <a class="btn btn-outline-primary btn-sm" href="{{ url_for('view_file', relative_path=item.path) }}">View</a>
+                      <button class="btn btn-outline-secondary btn-sm archive-button" type="button" data-thought-path="{{ item.path }}">Archive</button>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr><td colspan="5" class="text-secondary">No active raw ideas yet.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="row g-4 mb-4">
+    <div class="col-12 col-xl-5">
+      <div class="card surface-card card-shadow border-0 h-100">
+        <div class="card-body p-4 p-xl-5">
+          <div class="text-uppercase text-secondary small fw-semibold mb-2">Digest by App/Product</div>
+          <div id="digest-preview-empty" class="{% if digest_preview %}d-none{% endif %} text-secondary">
+            Request a digest to group raw thoughts by app/product and sprint group.
+          </div>
+          <div id="digest-preview-body" class="{% if not digest_preview %}d-none{% endif %}">
+            {% if digest_preview %}
+              <div class="table-responsive mb-3">
+                <table class="table inbox-table align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>App/Product</th>
+                      <th>Thoughts</th>
+                    </tr>
+                  </thead>
+                  <tbody id="digest-app-table">
+                    {% for row in digest_preview.app_groups %}
+                      <tr>
+                        <td>{{ row.app_product }}</td>
+                        <td>{{ row.thought_count }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              <div class="text-uppercase text-secondary small fw-semibold mb-2">Sprint Groups</div>
+              <div class="table-responsive">
+                <table class="table inbox-table align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>App/Product</th>
+                      <th>Sprint Group Name</th>
+                      <th>Ideas Included</th>
+                      <th>Proposed Type</th>
+                      <th>Feasibility</th>
+                      <th>Suggested Priority</th>
+                      <th>Recommended First Step</th>
+                      <th>Handoff MD</th>
+                    </tr>
+                  </thead>
+                  <tbody id="digest-sprint-table">
+                    {% for group in digest_preview.sprint_groups %}
+                      <tr>
+                        <td>{{ group.app_product }}</td>
+                        <td class="fw-semibold">{{ group.sprint_group_name }}</td>
+                        <td>{{ group.ideas_included }}</td>
+                        <td>{{ group.proposed_type }}</td>
+                        <td>{{ group.feasibility }}</td>
+                        <td>{{ group.suggested_priority }}</td>
+                        <td>{{ group.recommended_first_step }}</td>
+                        <td><code class="small">{{ group.sprint_group_name|lower|replace(' ', '-') }}.md</code></td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="col-12 col-xl-7">
       <div class="card surface-card card-shadow border-0 h-100">
         <div class="card-body p-4 p-xl-5">
-          <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-end mb-3">
-            <div>
-              <div class="text-uppercase text-secondary small fw-semibold mb-2">Idea Inventory</div>
-              <h2 class="h3 mb-1">Raw ideas waiting in the inventory</h2>
-              <div class="text-secondary">Keep these calm and readable until David approves a Proposed Update.</div>
-            </div>
-            <div class="text-secondary small">{{ idea_inventory_count }} active raw idea{{ '' if idea_inventory_count == 1 else 's' }}</div>
-          </div>
-          <div class="table-responsive">
-            <table class="table align-middle">
+          <div class="text-uppercase text-secondary small fw-semibold mb-2">Approved Sprint Handoffs</div>
+          <div class="table-responsive mb-3">
+            <table class="table inbox-table align-middle mb-0">
               <thead>
                 <tr>
-                  <th>Created</th>
-                  <th>Idea</th>
-                  <th>Status</th>
-                  <th>Actions</th>
+                  <th>App/Product</th>
+                  <th>Sprint Group Name</th>
+                  <th>Handoff MD</th>
                 </tr>
               </thead>
-              <tbody id="idea-inventory-body">
-                {% if conversation %}
-                  {% for item in conversation %}
-                    <tr data-thought-path="{{ item.path }}">
-                      <td class="text-nowrap">{{ item.created_at or item.mtime_display or 'Unknown' }}</td>
-                      <td>
-                        <div class="fw-semibold">{{ item.title }}</div>
-                        <div class="text-secondary small">{{ item.raw_text[:180] if item.raw_text else 'No raw text recorded.' }}</div>
-                      </td>
-                      <td>
-                        <span class="badge text-bg-warning">Idea Inventory</span>
-                        {% if item.ai_inferred_app %}<span class="badge text-bg-light border ms-1">{{ item.ai_inferred_app }}</span>{% endif %}
-                      </td>
-                      <td>
-                        <div class="d-flex flex-wrap gap-2">
-                          <a class="btn btn-outline-primary btn-sm" href="{{ url_for('view_file', relative_path=item.path) }}">View</a>
-                          <button class="btn btn-outline-secondary btn-sm archive-button" type="button" data-thought-path="{{ item.path }}">Archive</button>
-                        </div>
-                      </td>
+              <tbody id="handoff-table-body">
+                {% if digest_preview and digest_preview.approved_handoffs %}
+                  {% for group in digest_preview.approved_handoffs %}
+                    <tr>
+                      <td>{{ group.app_product }}</td>
+                      <td>{{ group.sprint_group_name }}</td>
+                      <td><code class="small">{{ group.sprint_group_name|lower|replace(' ', '-') }}.md</code></td>
                     </tr>
                   {% endfor %}
                 {% else %}
-                  <tr><td colspan="4" class="text-secondary">No active raw ideas yet.</td></tr>
+                  <tr><td colspan="3" class="text-secondary">No approved sprint handoffs yet.</td></tr>
                 {% endif %}
               </tbody>
             </table>
           </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="col-12 col-xl-5">
-      <div class="card surface-card card-shadow border-0 h-100">
-        <div class="card-body p-4 p-xl-5">
-          <div class="text-uppercase text-secondary small fw-semibold mb-2">Proposed Update Review</div>
-          <div id="digest-preview-empty" class="{% if digest_preview %}d-none{% endif %} text-secondary">
-            Request a Proposed Update Review after capturing ideas.
-          </div>
-          <div id="digest-preview-body" class="{% if not digest_preview %}d-none{% endif %}">
-            {% if digest_preview %}
-              <div class="priority-card mb-3">
-                <div class="text-uppercase text-secondary small fw-semibold mb-1">Idea Orders</div>
-                <div id="digest-grouped">{{ digest_preview.grouped_by_app }}</div>
-              </div>
-              <div class="priority-card mb-3">
-                <div class="text-uppercase text-secondary small fw-semibold mb-1">Proposed Update Summary</div>
-                <div id="digest-summary">{{ digest_preview.plain_summary }}</div>
-              </div>
-              <div class="priority-card mb-3">
-                <div class="text-uppercase text-secondary small fw-semibold mb-1">Recommended Codex prompt</div>
-                <pre class="assistant-pre mb-0" id="digest-codex">{{ digest_preview.recommended_codex_prompt }}</pre>
-              </div>
-              <div class="mb-3">
-                <div class="text-uppercase text-secondary small fw-semibold mb-2">Proposed Updates</div>
-                <div id="proposed-item-list">
-                  {% for item in digest_preview.proposed_items %}
-                    <div class="proposal-card mt-3">
-                      <div class="fw-semibold">{{ item.title }}</div>
-                      <div class="text-secondary small">Destination: {{ item.destination_folder }} · App: {{ item.app_project }} · Priority: {{ item.priority }}</div>
-                      <div class="text-secondary small mt-1">{{ item.plain_english_summary }}</div>
-                      <div class="text-secondary small mt-1">Next: {{ item.suggested_next_action }}</div>
-                      <div class="text-secondary small mt-1">Sources: {{ item.source_thoughts }}</div>
-                      <div class="text-secondary small mt-1">Type: {{ item.type }}</div>
-                    </div>
-                  {% endfor %}
-                </div>
-              </div>
-            {% endif %}
-          </div>
           <div id="digest-actions" class="d-flex flex-wrap gap-2 {% if not digest_preview %}d-none{% endif %}">
-            <button class="btn btn-primary" type="button" id="approve-digest-button">Approve Update</button>
+            <button class="btn btn-primary" type="button" id="approve-digest-button">Approve Sprint Groups</button>
             <button class="btn btn-outline-secondary" type="button" id="cancel-digest-button">Keep Ideas in Inventory</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="col-12">
-      <div class="card surface-card card-shadow border-0">
-        <div class="card-body p-4 p-xl-5">
-          <div class="text-uppercase text-secondary small fw-semibold mb-2">Shipped Updates</div>
-          <h2 class="h4 mb-2">Shipped / live updates</h2>
-          <div class="text-secondary mb-3">Approved updates become shipped update records, separate from the Idea Inventory.</div>
-          <div class="row g-3">
-            {% for update in update_shipments %}
-              <div class="col-12 col-lg-6">
-                <div class="proposal-card h-100">
-                  <div class="fw-semibold">{{ update.title }}</div>
-                  <div class="text-secondary small">{{ update.mtime_display }} · {{ update.path }}</div>
-                  <div class="text-secondary small mt-2">{{ update.excerpt }}</div>
-                </div>
-              </div>
-            {% else %}
-              <div class="col-12"><div class="text-secondary">No shipped updates yet.</div></div>
-            {% endfor %}
           </div>
         </div>
       </div>
@@ -174,10 +208,9 @@
   const input = form.querySelector('textarea[name="message"]');
   const previewBody = document.getElementById('digest-preview-body');
   const previewEmpty = document.getElementById('digest-preview-empty');
-  const summaryEl = document.getElementById('digest-summary');
-  const groupedEl = document.getElementById('digest-grouped');
-  const codexEl = document.getElementById('digest-codex');
-  const proposedList = document.getElementById('proposed-item-list');
+  const digestAppTable = document.getElementById('digest-app-table');
+  const digestSprintTable = document.getElementById('digest-sprint-table');
+  const handoffTableBody = document.getElementById('handoff-table-body');
   const actionBar = document.getElementById('digest-actions');
   const ideaInventoryBody = document.getElementById('idea-inventory-body');
   let digestPreview = {{ digest_preview | tojson if digest_preview else 'null' }};
@@ -186,22 +219,43 @@
     digestPreview = data;
     previewEmpty.classList.add('d-none');
     previewBody.classList.remove('d-none');
-    summaryEl.textContent = data.plain_summary || '';
-    groupedEl.textContent = JSON.stringify(data.grouped_by_app || {}, null, 2);
-    codexEl.textContent = data.recommended_codex_prompt || '';
-    proposedList.innerHTML = '';
-    (data.proposed_items || []).forEach((item) => {
-      const div = document.createElement('div');
-      div.className = 'proposal-card mt-3';
-      div.innerHTML = `
-        <div class="fw-semibold">${item.title || ''}</div>
-        <div class="text-secondary small">Destination: ${item.destination_folder || ''} · App: ${item.app_project || ''} · Priority: ${item.priority || ''}</div>
-        <div class="text-secondary small mt-1">${item.plain_english_summary || ''}</div>
-        <div class="text-secondary small mt-1">Next: ${item.suggested_next_action || ''}</div>
-        <div class="text-secondary small mt-1">Sources: ${(item.source_thoughts || []).join(', ')}</div>
-      `;
-      proposedList.appendChild(div);
-    });
+    if (digestAppTable) {
+      digestAppTable.innerHTML = '';
+      (data.app_groups || []).forEach((row) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${row.app_product || ''}</td><td>${row.thought_count || 0}</td>`;
+        digestAppTable.appendChild(tr);
+      });
+    }
+    if (digestSprintTable) {
+      digestSprintTable.innerHTML = '';
+      (data.sprint_groups || []).forEach((group) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${group.app_product || ''}</td>
+          <td class="fw-semibold">${group.sprint_group_name || ''}</td>
+          <td>${group.ideas_included || 0}</td>
+          <td>${group.proposed_type || ''}</td>
+          <td>${group.feasibility || ''}</td>
+          <td>${group.suggested_priority || ''}</td>
+          <td>${group.recommended_first_step || ''}</td>
+          <td><code class="small">${(group.sprint_group_name || '').toLowerCase().replace(/\s+/g, '-')}.md</code></td>
+        `;
+        digestSprintTable.appendChild(tr);
+      });
+    }
+    if (handoffTableBody) {
+      handoffTableBody.innerHTML = '';
+      (data.approved_handoffs || []).forEach((group) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${group.app_product || ''}</td>
+          <td>${group.sprint_group_name || ''}</td>
+          <td><code class="small">${(group.sprint_group_name || '').toLowerCase().replace(/\s+/g, '-')}.md</code></td>
+        `;
+        handoffTableBody.appendChild(tr);
+      });
+    }
     if (actionBar) actionBar.classList.remove('d-none');
   }
 
@@ -210,7 +264,7 @@
     const data = await res.json();
     ideaInventoryBody.innerHTML = '';
     if (!data.thoughts || !data.thoughts.length) {
-      ideaInventoryBody.innerHTML = '<tr><td colspan="4" class="text-secondary">No active raw ideas yet.</td></tr>';
+      ideaInventoryBody.innerHTML = '<tr><td colspan="5" class="text-secondary">No active raw ideas yet.</td></tr>';
       return;
     }
     data.thoughts.forEach((item) => {
@@ -222,10 +276,8 @@
           <div class="fw-semibold">${item.title || ''}</div>
           <div class="text-secondary small">${(item.raw_text || '').slice(0, 180) || 'No raw text recorded.'}</div>
         </td>
-        <td>
-          <span class="badge text-bg-warning">Idea Inventory</span>
-          ${item.ai_inferred_app ? `<span class="badge text-bg-light border ms-1">${item.ai_inferred_app}</span>` : ''}
-        </td>
+        <td><span class="badge text-bg-light border">${item.ai_inferred_app || 'Other'}</span></td>
+        <td><span class="badge text-bg-warning">${item.digest_status || 'not_digested'}</span></td>
         <td>
           <div class="d-flex flex-wrap gap-2">
             <a class="btn btn-outline-primary btn-sm" href="/view/${item.path}">View</a>
@@ -239,7 +291,7 @@
   }
 
   async function requestDigest() {
-    status.textContent = 'Building proposed update review...';
+    status.textContent = 'Building sprint groups...';
     const res = await fetch('{{ url_for("assistant_digest_preview") }}', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -247,11 +299,11 @@
     });
     const data = await res.json();
     if (!res.ok) {
-      status.textContent = data.error || 'Proposed update review failed.';
+      status.textContent = data.error || 'Digest failed.';
       return;
     }
     renderPreview(data.digest_preview);
-    status.textContent = 'Proposed update review ready.';
+    status.textContent = 'Sprint groups ready.';
   }
 
   async function sendMessage(message) {
@@ -263,7 +315,8 @@
     const digestRequest = trimmed.toLowerCase() === 'digest my thought box'
       || trimmed.toLowerCase() === 'digest idea inventory'
       || trimmed.toLowerCase() === 'digest idea orders'
-      || trimmed.toLowerCase() === 'proposed update review';
+      || trimmed.toLowerCase() === 'proposed update review'
+      || trimmed.toLowerCase() === 'digest sprint groups';
     if (digestRequest) {
       await requestDigest();
       input.value = '';
@@ -287,10 +340,10 @@
 
   async function approveDigest() {
     if (!digestPreview) {
-      status.textContent = 'Build a proposed update review first.';
+      status.textContent = 'Build sprint groups first.';
       return;
     }
-    status.textContent = 'Approving update...';
+    status.textContent = 'Approving sprint groups...';
     const res = await fetch('{{ url_for("assistant_approve_digest") }}', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -301,7 +354,7 @@
       status.textContent = data.error || 'Approval failed.';
       return;
     }
-    status.textContent = data.assistant_reply || 'Update approved.';
+    status.textContent = data.assistant_reply || 'Approved.';
     digestPreview = null;
     previewBody.classList.add('d-none');
     previewEmpty.classList.remove('d-none');
@@ -314,7 +367,7 @@
     previewBody.classList.add('d-none');
     previewEmpty.classList.remove('d-none');
     if (actionBar) actionBar.classList.add('d-none');
-    status.textContent = 'Proposed update review cleared. Ideas kept raw.';
+    status.textContent = 'Sprint groups cleared. Ideas kept raw.';
   }
 
   async function archiveThought(path) {

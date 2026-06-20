@@ -16,13 +16,16 @@ class WorklogAssistantTests(unittest.TestCase):
         self._make_kb()
         self.old_root = viewer_app.WORKLOG_ROOT
         self.old_thought = viewer_app.THOUGHT_BOX_DIR
+        self.old_handoffs = viewer_app.SPRINT_HANDOFFS_DIR
         viewer_app.WORKLOG_ROOT = self.root
         viewer_app.THOUGHT_BOX_DIR = self.root / "04-inbox/thought-box"
+        viewer_app.SPRINT_HANDOFFS_DIR = self.root / "05-sprint-handoffs"
         viewer_app.app.config["OPENAI_API_KEY"] = ""
 
     def tearDown(self) -> None:
         viewer_app.WORKLOG_ROOT = self.old_root
         viewer_app.THOUGHT_BOX_DIR = self.old_thought
+        viewer_app.SPRINT_HANDOFFS_DIR = self.old_handoffs
         self.tmp.cleanup()
 
     def _make_worklog(self) -> None:
@@ -38,6 +41,7 @@ class WorklogAssistantTests(unittest.TestCase):
             "04-inbox/thought-box/digested",
             "04-inbox/thought-box/archived",
             "05-release-notes/assistant-update-shipments",
+            "05-sprint-handoffs",
         ]:
             (self.root / rel).mkdir(parents=True, exist_ok=True)
         (self.root / "00-dashboard/current-focus.md").write_text("# Current Focus\n\n- Keep the day simple.\n", encoding="utf-8")
@@ -82,14 +86,19 @@ class WorklogAssistantTests(unittest.TestCase):
             }
         return client
 
+    def _write_thought(self, name: str, body: str) -> Path:
+        path = self.root / "04-inbox/thought-box" / name
+        path.write_text(body, encoding="utf-8")
+        return path
+
     def test_assistant_renders(self) -> None:
         response = self._client().get("/assistant")
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)
-        self.assertIn("Idea Inventory", html)
-        self.assertIn("Proposed Update Review", html)
-        self.assertIn("Raw ideas waiting in the inventory", html)
-        self.assertNotIn("Conversation log", html)
+        self.assertIn("Idea Inventory digest to sprint groups", html)
+        self.assertIn("Active Idea Inventory", html)
+        self.assertIn("Digest by App/Product", html)
+        self.assertIn("Approved Sprint Handoffs", html)
 
     def test_message_stores_raw_idea(self) -> None:
         response = self._client().post(
@@ -105,103 +114,85 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("- status: raw", content)
         self.assertIn("- digest_status: not_digested", content)
 
-    def test_missing_openai_key_is_safe(self) -> None:
-        response = self._client().post("/api/assistant/message", json={"message": "hi"})
-        body = response.get_json()
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("OpenAI is not configured", body["assistant_reply"])
-
-    def test_digest_preview_reads_undigested_idea_files(self) -> None:
-        thought = self.root / "04-inbox/thought-box/2026-06-20-100000-ims-break-bulk.md"
-        thought.write_text(
-            "# IMS\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs break bulk handling.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs break bulk handling.\n",
-            encoding="utf-8",
+    def test_digest_preview_does_not_move_files(self) -> None:
+        thought = self._write_thought(
+            "2026-06-20-100000-ims-break-bulk.md",
+            "# IMS\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs break bulk handling and a box-quantity UI update.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs break bulk handling.\n",
         )
         before = sorted(p.name for p in (self.root / "04-inbox/thought-box").glob("*.md"))
         response = self._client().get("/assistant?digest_preview=1")
         after = sorted(p.name for p in (self.root / "04-inbox/thought-box").glob("*.md"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(before, after)
-        self.assertIn("Proposed Update Review", response.get_data(as_text=True))
-        self.assertIn("Proposed Updates", response.get_data(as_text=True))
-
-    def test_digest_preview_does_not_move_files(self) -> None:
-        thought = self.root / "04-inbox/thought-box/2026-06-20-110000-general.md"
-        thought.write_text(
-            "# General\n\n- created_at: 2026-06-20T11:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: General thought.\n",
-            encoding="utf-8",
-        )
-        _ = self._client().get("/assistant?digest_preview=1")
         self.assertTrue(thought.exists())
-        self.assertEqual(thought.parent.name, "thought-box")
+        html = response.get_data(as_text=True)
+        self.assertIn("Sprint Groups", html)
 
-    def test_digest_command_does_not_create_raw_idea(self) -> None:
-        response = self._client().post("/api/assistant/message", json={"message": "digest my thought box"})
+    def test_digest_groups_by_app_and_sprint_group(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-ims.md",
+            "# IMS\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs break bulk handling and better table labels.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs break bulk handling.\n",
+        )
+        self._write_thought(
+            "2026-06-20-100001-ims-2.md",
+            "# IMS 2\n\n- created_at: 2026-06-20T10:00:01Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs better table labels and status cards.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs better table labels.\n",
+        )
+        preview = self._client().post("/api/assistant/digest-preview", json={}).get_json()["digest_preview"]
+        self.assertIn("app_groups", preview)
+        self.assertIn("sprint_groups", preview)
+        self.assertEqual(preview["app_groups"][0]["app_product"], "IMS")
+        self.assertGreaterEqual(preview["app_groups"][0]["thought_count"], 2)
+        self.assertTrue(any(group["app_product"] == "IMS" for group in preview["sprint_groups"]))
+
+    def test_digest_output_renders_as_tables(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-worklog-ui.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Worklog should have a calmer dashboard table.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Worklog should have a calmer dashboard table.\n",
+        )
+        html = self._client().get("/assistant?digest_preview=1").get_data(as_text=True)
+        self.assertIn("<table", html)
+        self.assertIn("Digest by App/Product", html)
+        self.assertIn("Sprint Groups", html)
+
+    def test_approve_digest_creates_handoffs_and_moves_thoughts(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-ims.md",
+            "# IMS\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs break bulk handling.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs break bulk handling.\n",
+        )
+        self._write_thought(
+            "2026-06-20-100001-ims-2.md",
+            "# IMS 2\n\n- created_at: 2026-06-20T10:00:01Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs a box-quantity sprint group.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs a box-quantity sprint group.\n",
+        )
+        preview = self._client().post("/api/assistant/digest-preview", json={}).get_json()["digest_preview"]
+        response = self._client().post("/api/assistant/approve-digest", json={"digest_preview": preview})
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
-        self.assertFalse(body["created_raw_thought"])
-        self.assertIn("digest_preview", body)
-        self.assertEqual(list((self.root / "04-inbox/thought-box").glob("*.md")), [])
+        self.assertTrue(body["created_handoffs"])
+        self.assertTrue(body["moved_thoughts"])
+        handoff_files = list((self.root / "05-sprint-handoffs").glob("*.md"))
+        self.assertTrue(handoff_files)
+        handoff_text = handoff_files[0].read_text(encoding="utf-8")
+        self.assertIn("# Sprint Handoff:", handoff_text)
+        self.assertIn("## Codex/ChatGPT Starting Prompt", handoff_text)
+        self.assertIn("## Source Ideas", handoff_text)
+        self.assertTrue(list((self.root / "04-inbox/thought-box/digested").glob("*.md")))
 
-    def test_digest_idea_inventory_command_does_not_create_raw_idea(self) -> None:
-        response = self._client().post("/api/assistant/message", json={"message": "digest idea inventory"})
+    def test_handoff_includes_source_ideas_and_prompt(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-worklog.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Worklog needs a calmer inbox queue.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Worklog needs a calmer inbox queue.\n",
+        )
+        preview = self._client().post("/api/assistant/digest-preview", json={}).get_json()["digest_preview"]
+        response = self._client().post("/api/assistant/approve-digest", json={"digest_preview": preview})
         self.assertEqual(response.status_code, 200)
-        body = response.get_json()
-        self.assertFalse(body["created_raw_thought"])
-        self.assertIn("digest_preview", body)
-        self.assertEqual(list((self.root / "04-inbox/thought-box").glob("*.md")), [])
+        handoff_file = next((self.root / "05-sprint-handoffs").glob("*.md"))
+        text = handoff_file.read_text(encoding="utf-8")
+        self.assertIn("Source Ideas", text)
+        self.assertIn("Codex/ChatGPT Starting Prompt", text)
 
     def test_no_thoughts_empty_state_works(self) -> None:
-        response = self._client().get("/assistant")
-        html = response.get_data(as_text=True)
-        self.assertIn("No active raw ideas yet.", html)
-
-    def test_approve_digest_creates_items_and_moves_thoughts(self) -> None:
-        thought1 = self.root / "04-inbox/thought-box/2026-06-20-100000-ims.md"
-        thought1.write_text(
-            "# IMS\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs break bulk handling.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs break bulk handling.\n",
-            encoding="utf-8",
-        )
-        thought2 = self.root / "04-inbox/thought-box/2026-06-20-100001-ims-2.md"
-        thought2.write_text(
-            "# IMS 2\n\n- created_at: 2026-06-20T10:00:01Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs break bulk handling.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs break bulk handling.\n",
-            encoding="utf-8",
-        )
-        preview = self._client().post("/api/assistant/digest-preview", json={}).get_json()["digest_preview"]
-        response = self._client().post("/api/assistant/approve-digest", json={"digest_preview": preview})
-        self.assertEqual(response.status_code, 200)
-        body = response.get_json()
-        self.assertTrue(body["created_items"])
-        self.assertTrue(body["moved_thoughts"])
-        self.assertTrue(list((self.root / "04-inbox/features").glob("*.md")))
-        self.assertTrue(list((self.root / "04-inbox/thought-box/digested").glob("*.md")))
-        self.assertTrue(list((self.root / "05-release-notes/assistant-update-shipments").glob("*.md")))
         html = self._client().get("/assistant").get_data(as_text=True)
         self.assertIn("No active raw ideas yet.", html)
-
-    def test_update_bundle_tracked_separately(self) -> None:
-        thought = self.root / "04-inbox/thought-box/2026-06-20-130000-ims.md"
-        thought.write_text(
-            "# IMS\n\n- created_at: 2026-06-20T13:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs a barcode update.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs a barcode update.\n",
-            encoding="utf-8",
-        )
-        preview = self._client().post("/api/assistant/digest-preview", json={}).get_json()["digest_preview"]
-        response = self._client().post("/api/assistant/approve-digest", json={"digest_preview": preview})
-        self.assertEqual(response.status_code, 200)
-        update_files = list((self.root / "05-release-notes/assistant-update-shipments").glob("*.md"))
-        self.assertEqual(len(update_files), 1)
-        self.assertIn("shipped/live", update_files[0].read_text(encoding="utf-8"))
-
-    def test_archive_thought_moves_raw_file(self) -> None:
-        thought = self.root / "04-inbox/thought-box/2026-06-20-120000-note.md"
-        thought.write_text(
-            "# Note\n\n- created_at: 2026-06-20T12:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Archive this.\n",
-            encoding="utf-8",
-        )
-        response = self._client().post("/api/assistant/archive-thought", json={"thought_path": "04-inbox/thought-box/2026-06-20-120000-note.md"})
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(thought.exists())
-        self.assertTrue((self.root / "04-inbox/thought-box/archived/2026-06-20-120000-note.md").exists())
 
 
 if __name__ == "__main__":
