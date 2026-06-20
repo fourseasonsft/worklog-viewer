@@ -220,6 +220,12 @@ def _format_file_timestamp(path: Path) -> str:
         return "Unknown"
 
 
+def _format_local_timestamp(dt: datetime | None = None) -> str:
+    dt = dt or datetime.now(timezone.utc)
+    local_dt = dt.astimezone()
+    return local_dt.strftime("%Y-%m-%d %H:%M")
+
+
 def _extract_section_text(markdown_text: str, heading: str) -> str:
     heading = heading.strip().lower()
     collecting = False
@@ -829,6 +835,16 @@ def _parse_thought_file(path: Path) -> dict[str, str]:
             data[current] = (data.get(current, "") + "\n" + line).strip()
     data["title"] = data.get("title") or path.stem.replace("-", " ").title()
     data["raw_text"] = data.get("raw_text") or data.get("raw") or ""
+    raw_lines = []
+    for line in data["raw_text"].splitlines():
+        cleaned = line.strip()
+        if not cleaned or cleaned.startswith("#") or cleaned.startswith("- "):
+            continue
+        if re.match(r"^\d{4}-\d{2}-\d{2}", cleaned):
+            continue
+        raw_lines.append(cleaned)
+    data["display_snippet"] = " ".join(raw_lines[:3]).strip()
+    data["created_display"] = _format_local_timestamp(datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc))
     return data
 
 

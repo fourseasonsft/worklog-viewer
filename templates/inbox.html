@@ -11,7 +11,7 @@
       <div class="d-flex flex-wrap gap-2">
         <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('dashboard') }}">Dashboard</a>
         <a class="btn btn-outline-primary btn-sm" href="{{ url_for('assistant') }}">Idea Inventory</a>
-        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('intake') }}">Structured Intake</a>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('intake') }}">Structured Intake</a>
       </div>
     </div>
   </div>
@@ -22,7 +22,7 @@
     <form method="get" action="{{ url_for('inbox') }}" class="row g-3 align-items-end">
       <div class="col-12 col-md-6 col-xl-3">
         <label class="form-label">Category</label>
-        <select class="form-select" name="type">
+        <select class="form-select" name="type" onchange="this.form.requestSubmit()">
           {% for option in inbox_types %}
             <option value="{{ option.value }}" {% if option.value == inbox_type %}selected{% endif %}>{{ option.label }}</option>
           {% endfor %}
@@ -30,14 +30,13 @@
       </div>
       <div class="col-12 col-md-6 col-xl-3">
         <label class="form-label">App / Product</label>
-        <select class="form-select" name="app">
+        <select class="form-select" name="app" onchange="this.form.requestSubmit()">
           {% for option in app_filters %}
             <option value="{{ option.value }}" {% if option.value == app_filter %}selected{% endif %}>{{ option.label }}</option>
           {% endfor %}
         </select>
       </div>
       <div class="col-12 col-xl-6 d-flex flex-wrap gap-2">
-        <button class="btn btn-primary" type="submit">Apply filters</button>
         <a class="btn btn-outline-secondary" href="{{ url_for('inbox') }}">Reset</a>
       </div>
     </form>

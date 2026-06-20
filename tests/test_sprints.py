@@ -116,6 +116,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("Sprint Queue", html)
         self.assertIn("IMS Sprint", html)
         self.assertIn("Start Sprint", html)
+        self.assertIn("onchange=\"this.form.requestSubmit()\"", html)
 
     def test_filters_work(self) -> None:
         self._create_sprint_record("approved")

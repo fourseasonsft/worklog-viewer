@@ -233,7 +233,6 @@
   const digestAppTable = document.getElementById('digest-app-table');
   const digestSprintTable = document.getElementById('digest-sprint-table');
   const handoffTableBody = document.getElementById('handoff-table-body');
-  const actionBar = document.getElementById('digest-actions');
   const ideaInventoryBody = document.getElementById('idea-inventory-body');
   const selectedCountBadge = document.getElementById('selected-count-badge');
   const selectionStatus = document.getElementById('selection-status');
@@ -301,7 +300,6 @@
         handoffTableBody.appendChild(tr);
       });
     }
-    if (actionBar) actionBar.classList.remove('d-none');
   }
 
   async function refreshIdeas() {
@@ -316,10 +314,10 @@
       const row = document.createElement('tr');
       row.dataset.thoughtPath = item.path;
       row.innerHTML = `
-        <td class="text-nowrap">${item.created_at || item.mtime_display || 'Unknown'}</td>
+        <td class="text-nowrap">${item.created_display || item.created_at || item.mtime_display || 'Unknown'}</td>
         <td>
           <div class="fw-semibold">${item.title || ''}</div>
-          <div class="text-secondary small">${(item.raw_text || '').slice(0, 180) || 'No raw text recorded.'}</div>
+          <div class="text-secondary small">${item.display_snippet || 'No raw text recorded.'}</div>
         </td>
         <td><span class="badge text-bg-light border">${item.ai_inferred_app || 'Other'}</span></td>
         <td><span class="badge text-bg-warning">${item.digest_status || 'not_digested'}</span></td>
@@ -408,7 +406,6 @@
     digestPreview = null;
     previewBody.classList.add('d-none');
     previewEmpty.classList.remove('d-none');
-    if (actionBar) actionBar.classList.add('d-none');
     await refreshIdeas();
   }
 
@@ -416,7 +413,6 @@
     digestPreview = null;
     previewBody.classList.add('d-none');
     previewEmpty.classList.remove('d-none');
-    if (actionBar) actionBar.classList.add('d-none');
     status.textContent = 'Sprint groups cleared. Ideas kept raw.';
   }
 

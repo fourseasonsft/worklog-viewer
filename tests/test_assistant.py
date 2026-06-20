@@ -116,6 +116,15 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("- status: raw", content)
         self.assertIn("- digest_status: not_digested", content)
 
+    def test_inventory_table_uses_short_display_fields(self) -> None:
+        thought = self._write_thought(
+            "2026-06-20-100000-clean.md",
+            "# Clean Thought\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: 2026-06-20 10:00 Please tighten the IMS table.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: Please tighten the IMS table.\n",
+        )
+        item = viewer_app._thought_box_items(digested_only=False)[0]
+        self.assertRegex(item["created_display"], r"2026-06-20 \d{2}:\d{2}")
+        self.assertNotIn("2026-06-20 10:00", item["display_snippet"])
+
     def test_digest_preview_does_not_move_files(self) -> None:
         thought = self._write_thought(
             "2026-06-20-100000-ims-break-bulk.md",

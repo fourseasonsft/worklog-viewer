@@ -23,7 +23,7 @@
     <form method="get" action="{{ url_for('sprints') }}" class="row g-3 align-items-end">
       <div class="col-12 col-md-6 col-xl-3">
         <label class="form-label">Status</label>
-        <select class="form-select" name="status">
+        <select class="form-select" name="status" onchange="this.form.requestSubmit()">
           {% for option in status_options %}
             <option value="{{ option.value }}" {% if option.value == status_filter %}selected{% endif %}>{{ option.label }}</option>
           {% endfor %}
@@ -31,14 +31,13 @@
       </div>
       <div class="col-12 col-md-6 col-xl-3">
         <label class="form-label">App / Product</label>
-        <select class="form-select" name="app">
+        <select class="form-select" name="app" onchange="this.form.requestSubmit()">
           {% for option in app_filters %}
             <option value="{{ option.value }}" {% if option.value == app_filter %}selected{% endif %}>{{ option.label }}</option>
           {% endfor %}
         </select>
       </div>
       <div class="col-12 col-xl-6 d-flex flex-wrap gap-2">
-        <button class="btn btn-primary" type="submit">Apply filters</button>
         <a class="btn btn-outline-secondary" href="{{ url_for('sprints') }}">Reset</a>
       </div>
     </form>

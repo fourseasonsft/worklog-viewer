@@ -69,6 +69,7 @@ class WorklogInboxTests(unittest.TestCase):
         self.assertIn("App / Product", html)
         self.assertIn("Parking bug", html)
         self.assertNotIn("Closed parking item", html)
+        self.assertIn("onchange=\"this.form.requestSubmit()\"", html)
 
     def test_inbox_all_excludes_closed(self) -> None:
         html = self._client().get("/inbox?type=all").get_data(as_text=True)
