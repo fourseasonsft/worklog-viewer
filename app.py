@@ -702,7 +702,7 @@ def _sprints_dir(status: str | None = None) -> Path:
 
 
 def _ensure_sprint_dirs() -> None:
-    for status in ["proposed", "rejected", "approved", "active", "completed", "shipped"]:
+    for status in ["proposed", "rejected", "approved", "active", "completed", "staged", "shipped"]:
         _sprints_dir(status).mkdir(parents=True, exist_ok=True)
 
 
@@ -1055,6 +1055,18 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
     }
 
 
+def _set_sprint_status(record: dict[str, object], status: str) -> Path:
+    status = status.strip().lower()
+    if status not in {"proposed", "approved", "active", "completed", "staged", "shipped"}:
+        raise ValueError(f"Unsupported sprint status: {status}")
+    record_path = WORKLOG_ROOT / str(record["path"])
+    new_path = _update_sprint_record(record_path, status)
+    record["status_key"] = status
+    record["status"] = status.title()
+    record["path"] = str(new_path.relative_to(WORKLOG_ROOT))
+    return new_path
+
+
 def _resolve_sprint_source_thoughts(record: dict[str, object]) -> list[dict[str, str]]:
     thoughts = _thoughts_by_ids([str(item) for item in record.get("source_thought_ids", []) if str(item).strip()])
     if thoughts:
@@ -1370,7 +1382,7 @@ def _assistant_update_shipments() -> list[dict[str, str]]:
 def _sprint_records() -> list[dict[str, object]]:
     _ensure_sprint_dirs()
     records = []
-    for status in ["proposed", "approved", "active", "completed", "shipped"]:
+    for status in ["proposed", "approved", "active", "completed", "staged", "shipped"]:
         for path in sorted(_sprints_dir(status).glob("*.md"), reverse=True):
             record = _parse_sprint_record(path)
             record["status_key"] = status
@@ -1393,11 +1405,11 @@ def _filter_sprint_records(records: list[dict[str, object]], status: str, app_sl
 
 
 def _sprint_counts_by_app() -> dict[str, dict[str, int]]:
-    counts = {app: {"proposed": 0, "approved": 0, "active": 0, "completed": 0, "shipped": 0} for app in APP_FILTERS.values()}
+    counts = {app: {"proposed": 0, "approved": 0, "active": 0, "completed": 0, "staged": 0, "shipped": 0} for app in APP_FILTERS.values()}
     for record in _sprint_records():
         app = record.get("app_product") or "Other"
         if app not in counts:
-            counts[app] = {"proposed": 0, "approved": 0, "active": 0, "completed": 0, "shipped": 0}
+            counts[app] = {"proposed": 0, "approved": 0, "active": 0, "completed": 0, "staged": 0, "shipped": 0}
         key = str(record.get("status_key") or "proposed")
         if key in counts[app]:
             counts[app][key] += 1
@@ -1449,6 +1461,7 @@ def _sprint_queue_dashboard_counts() -> dict[str, int]:
         "approved": sum(1 for record in records if record.get("status_key") == "approved"),
         "active": sum(1 for record in records if record.get("status_key") == "active"),
         "completed": sum(1 for record in records if record.get("status_key") == "completed"),
+        "staged": sum(1 for record in records if record.get("status_key") == "staged"),
         "shipped": sum(1 for record in records if record.get("status_key") == "shipped"),
     }
 
@@ -1722,7 +1735,7 @@ def _build_codex_prompt(app_name: str, sprint_name: str, thoughts: list[dict[str
         f"Work on the sprint group '{sprint_name}'. "
         f"Sprint Code: {sprint_code or 'TBD'}. "
         f"Purpose: {purpose}. "
-        "Completion Requirement: At the end of this sprint, update the matching Sprint Queue record by Sprint Code. Do not leave the sprint status stale. "
+        "Completion Requirement: Mark work Completed when implementation is finished but not yet deployed. Mark it Staged when deployed to DEV or staging and ready for validation. Mark it Shipped when deployed to production or live. Update the matching Sprint Queue record by Sprint Code and do not leave the sprint status stale. "
         f"Source ideas: {source_titles}. "
         "Keep the scope small, preserve existing behavior, and return a concise plan before editing files."
     )
@@ -1765,7 +1778,7 @@ def _build_handoff_markdown(app_name: str, sprint_name: str, thoughts: list[dict
             str(group.get("recommended_first_step") or (thoughts[0].get("normalized_summary") if thoughts else "Open the source ideas, confirm the smallest common implementation slice, and outline the first chat response.")),
             "",
             "## Completion Requirement",
-            f"When this sprint is complete, update Worklog using Sprint Code {sprint_code}.",
+            f"When implementation is finished but not deployed, mark the sprint Completed. When deployed to DEV or staging and ready for validation, mark the sprint Staged. When deployed to production or live, mark the sprint Shipped. Update Worklog using Sprint Code {sprint_code}.",
             "",
             "## Codex/ChatGPT Starting Prompt",
             str(group.get("starting_prompt") or _build_codex_prompt(app_name, sprint_name, thoughts, sprint_code)),
@@ -2400,7 +2413,7 @@ def assistant():
 @_require_worklog_session
 def sprints():
     status = (request.args.get("status") or "all").strip().lower()
-    if status not in {"all", "proposed", "approved", "active", "completed", "shipped"}:
+    if status not in {"all", "proposed", "approved", "active", "completed", "staged", "shipped"}:
         status = "all"
     app_slug = _normalize_app_filter(request.args.get("app"))
     records = _filter_sprint_records(_sprint_records(), status, app_slug)
@@ -2416,6 +2429,7 @@ def sprints():
             {"value": "approved", "label": "Approved"},
             {"value": "active", "label": "Active"},
             {"value": "completed", "label": "Completed"},
+            {"value": "staged", "label": "Staged"},
             {"value": "shipped", "label": "Shipped"},
         ],
         app_filters=[
@@ -2458,6 +2472,8 @@ def sprint_action(sprint_id: str):
         new_path = _update_sprint_record(record_path, "active")
     elif action == "complete":
         new_path = _update_sprint_record(record_path, "completed")
+    elif action == "stage":
+        new_path = _update_sprint_record(record_path, "staged")
     elif action == "ship":
         new_path = _update_sprint_record(record_path, "shipped")
     elif action == "regenerate_handoff":
@@ -2492,6 +2508,8 @@ def sprint_action_by_code(sprint_code: str):
         record_path = _update_sprint_record(record_path, "active")
     elif action == "complete":
         record_path = _update_sprint_record(record_path, "completed")
+    elif action == "stage":
+        record_path = _update_sprint_record(record_path, "staged")
     elif action == "ship":
         record_path = _update_sprint_record(record_path, "shipped")
     elif action == "regenerate_handoff":

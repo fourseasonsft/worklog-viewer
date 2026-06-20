@@ -36,6 +36,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
             "06-sprints/approved",
             "06-sprints/active",
             "06-sprints/completed",
+            "06-sprints/staged",
             "06-sprints/shipped",
         ]:
             (self.root / rel).mkdir(parents=True, exist_ok=True)
@@ -101,10 +102,10 @@ class WorklogSprintQueueTests(unittest.TestCase):
                     "05-sprint-handoffs/2026-06-20-120000-ims-sprint.md",
                     "",
                     "## Codex/ChatGPT Starting Prompt",
-                    f"Sprint Code: {sprint_code}\nCompletion Requirement: At the end of this sprint, update the matching Sprint Queue record by Sprint Code. Do not leave the sprint status stale.\nStart a focused implementation conversation.",
+                    f"Sprint Code: {sprint_code}\nCompletion Requirement: Mark work Completed when implementation is finished but not yet deployed. Mark it Staged when deployed to DEV or staging and ready for validation. Mark it Shipped when deployed to production or live. Update the matching Sprint Queue record by Sprint Code and do not leave the sprint status stale.\nStart a focused implementation conversation.",
                     "",
                     "## Completion Requirement",
-                    f"When this sprint is complete, update Worklog using Sprint Code {sprint_code}.",
+                    f"When implementation is finished but not deployed, mark the sprint Completed. When deployed to DEV or staging and ready for validation, mark the sprint Staged. When deployed to production or live, mark the sprint Shipped. Update Worklog using Sprint Code {sprint_code}.",
                     "",
                 ]
             ),
@@ -135,6 +136,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
     def test_filters_work(self) -> None:
         self._create_sprint_record("approved")
         self._create_sprint_record("shipped", title="Worklog Sprint", app_product="Worklog")
+        self._create_sprint_record("staged", title="Worklog Staged", app_product="Worklog")
         client = self._client()
         approved_html = client.get("/sprints?status=approved").get_data(as_text=True)
         self.assertIn("IMS Sprint", approved_html)
@@ -142,6 +144,9 @@ class WorklogSprintQueueTests(unittest.TestCase):
         shipped_html = client.get("/sprints?status=shipped").get_data(as_text=True)
         self.assertIn("Worklog Sprint", shipped_html)
         self.assertNotIn("IMS Sprint", shipped_html)
+        staged_html = client.get("/sprints?status=staged").get_data(as_text=True)
+        self.assertIn("Worklog Staged", staged_html)
+        self.assertNotIn("IMS Sprint", staged_html)
         ims_html = client.get("/sprints?app=ims").get_data(as_text=True)
         self.assertIn("IMS Sprint", ims_html)
         self.assertNotIn("Worklog Sprint", ims_html)
@@ -149,14 +154,14 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("IMS Sprint", combo_html)
 
     def test_detail_page_renders(self) -> None:
-        self._create_sprint_record("approved")
-        html = self._client().get("/sprints/sp-20260620120000-approved").get_data(as_text=True)
+        self._create_sprint_record("completed")
+        html = self._client().get("/sprints/sp-20260620120000-completed").get_data(as_text=True)
         self.assertIn("Sprint Queue Record", html)
         self.assertIn("Sprint Code", html)
         self.assertIn("Generated Handoff", html)
         self.assertIn("Copy Prompt", html)
         self.assertIn("Copy Handoff", html)
-        self.assertIn("Regenerate Handoff", html)
+        self.assertIn("Mark Staged", html)
 
     def test_transitions_work(self) -> None:
         self._create_sprint_record("approved")
@@ -170,6 +175,11 @@ class WorklogSprintQueueTests(unittest.TestCase):
         completed_path = self.root / "06-sprints/completed/sp-20260620120000-approved-ims-sprint.md"
         self.assertTrue(completed_path.exists())
         client = self._client()
+        response = client.post("/sprints/sp-20260620120000-approved/action", data={"action": "stage"}, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        staged_path = self.root / "06-sprints/staged/sp-20260620120000-approved-ims-sprint.md"
+        self.assertTrue(staged_path.exists())
+        client = self._client()
         response = client.post("/sprints/sp-20260620120000-approved/action", data={"action": "ship"}, follow_redirects=True)
         self.assertEqual(response.status_code, 200)
         shipped_path = self.root / "06-sprints/shipped/sp-20260620120000-approved-ims-sprint.md"
@@ -180,15 +190,14 @@ class WorklogSprintQueueTests(unittest.TestCase):
         client = self._client()
         response = client.post(
             "/sprints/code/IMS-SPRINT-20260620-001/action",
-            data={"confirm": "yes", "action": "complete", "completion_notes": "Validated in browser."},
+            data={"confirm": "yes", "action": "stage", "completion_notes": "Validated in browser."},
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
         record = viewer_app._sprint_record_by_code("IMS-SPRINT-20260620-001")
         self.assertIsNotNone(record)
-        self.assertEqual(record["status_key"], "completed")
-        text = (self.root / "06-sprints/completed/sp-20260620120000-approved-ims-sprint.md").read_text(encoding="utf-8")
-        self.assertIn("## Completion Notes", text)
+        self.assertEqual(record["status_key"], "staged")
+        text = (self.root / "06-sprints/staged/sp-20260620120000-approved-ims-sprint.md").read_text(encoding="utf-8")
         self.assertIn("Validated in browser.", text)
 
     def test_approval_creates_sprint_record_and_handoff(self) -> None:
@@ -206,6 +215,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertTrue(record["source_idea_summaries"])
         self.assertIn("Completion Requirement", record["handoff_markdown"])
         self.assertIn("Source Ideas", record["handoff_markdown"])
+        self.assertIn("mark the sprint staged", record["handoff_markdown"].lower())
 
     def test_regenerate_handoff_repairs_source_sections(self) -> None:
         record_path = self._create_sprint_record("approved")
@@ -272,6 +282,12 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("Simplify the Inbox navigation and reduce visible category clutter.", handoff_text)
         self.assertIn("Completion Requirement", handoff_text)
         self.assertIn("Codex/ChatGPT Starting Prompt", handoff_text)
+        self.assertIn("mark the sprint staged", handoff_text.lower())
+
+    def test_dashboard_shows_staged_counts(self) -> None:
+        self._create_sprint_record("staged", title="IMS Staged", app_product="IMS")
+        counts = viewer_app._sprint_counts_by_app()
+        self.assertEqual(counts["IMS"]["staged"], 1)
 
     def test_regenerate_all_handoffs_action_runs(self) -> None:
         self._create_sprint_record("approved", title="IMS Sprint A")

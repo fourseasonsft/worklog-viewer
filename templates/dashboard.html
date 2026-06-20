@@ -14,7 +14,7 @@
           </div>
         </div>
         <div class="d-flex flex-column gap-2 text-xl-end">
-          <div class="card-pill">Capture → Group → Digest → Approve → Route → Execute → Ship</div>
+          <div class="card-pill">Capture → Group → Digest → Approve → Route → Execute → Stage → Ship</div>
           <div class="card-pill">Read-only markdown backed</div>
         </div>
       </div>
@@ -31,7 +31,7 @@
                 <div class="text-uppercase text-secondary small fw-semibold mb-1">{{ app.title }}</div>
                 <h2 class="h4 mb-0">{{ app.title }}</h2>
               </div>
-              <span class="badge {% if app.current_sprint_status|lower == 'active' %}text-bg-primary{% elif app.current_sprint_status|lower == 'blocked' %}text-bg-danger{% elif app.current_sprint_status|lower == 'paused' %}text-bg-secondary{% elif app.current_sprint_status|lower == 'stable' %}text-bg-success{% else %}text-bg-light border{% endif %}">
+              <span class="badge {% if app.current_sprint_status|lower == 'active' %}text-bg-primary{% elif app.current_sprint_status|lower == 'staged' %}text-bg-info{% elif app.current_sprint_status|lower == 'blocked' %}text-bg-danger{% elif app.current_sprint_status|lower == 'paused' %}text-bg-secondary{% elif app.current_sprint_status|lower == 'stable' %}text-bg-success{% else %}text-bg-light border{% endif %}">
                 {{ app.current_sprint_status or 'Stable' }}
               </span>
             </div>
@@ -90,6 +90,12 @@
                 <a class="priority-card d-block text-decoration-none" href="{{ url_for('sprints', app=app.slug, status='shipped') }}">
                   <div class="text-secondary small text-uppercase fw-semibold">Shipped</div>
                   <div class="fw-semibold">{{ app.sprint_counts.shipped }}</div>
+                </a>
+              </div>
+              <div class="col-6">
+                <a class="priority-card d-block text-decoration-none" href="{{ url_for('sprints', app=app.slug, status='staged') }}">
+                  <div class="text-secondary small text-uppercase fw-semibold">Staged</div>
+                  <div class="fw-semibold">{{ app.sprint_counts.staged }}</div>
                 </a>
               </div>
             </div>

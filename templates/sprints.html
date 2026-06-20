@@ -69,7 +69,7 @@
                 <td class="text-nowrap fw-semibold">{{ record.sprint_code }}</td>
                 <td class="fw-semibold">{{ record.title }}</td>
                 <td><span class="badge text-bg-light border">{{ record.app_product }}</span></td>
-                <td><span class="badge {% if record.status_key == 'active' %}text-bg-primary{% elif record.status_key == 'approved' %}text-bg-warning{% elif record.status_key == 'completed' %}text-bg-secondary{% elif record.status_key == 'shipped' %}text-bg-success{% else %}text-bg-light border{% endif %}">{{ record.status }}</span></td>
+                <td><span class="badge {% if record.status_key == 'active' %}text-bg-primary{% elif record.status_key == 'approved' %}text-bg-warning{% elif record.status_key == 'completed' %}text-bg-secondary{% elif record.status_key == 'staged' %}text-bg-info{% elif record.status_key == 'shipped' %}text-bg-success{% else %}text-bg-light border{% endif %}">{{ record.status }}</span></td>
                 <td>{{ record.idea_count }}</td>
                 <td>{{ record.scope }}</td>
                 <td class="text-nowrap">{{ record.created_at }}</td>
@@ -88,6 +88,11 @@
                         <button class="btn btn-outline-secondary btn-sm" type="submit">Complete Sprint</button>
                       </form>
                     {% elif record.status_key == 'completed' %}
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="stage">
+                        <button class="btn btn-outline-secondary btn-sm" type="submit">Mark Staged</button>
+                      </form>
+                    {% elif record.status_key == 'staged' %}
                       <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
                         <input type="hidden" name="action" value="ship">
                         <button class="btn btn-outline-secondary btn-sm" type="submit">Mark Shipped</button>
