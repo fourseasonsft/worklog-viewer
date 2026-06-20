@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
-import json
+import shutil
 import urllib.error
 import urllib.request
-from collections import Counter
+from collections import Counter, defaultdict
 from functools import wraps
 from datetime import datetime, timezone
 from pathlib import Path
@@ -447,6 +449,21 @@ def _intake_plain_mode_enabled() -> bool:
 
 def _ensure_thought_box_dir() -> None:
     THOUGHT_BOX_DIR.mkdir(parents=True, exist_ok=True)
+    _thought_digested_dir().mkdir(parents=True, exist_ok=True)
+    _thought_archived_dir().mkdir(parents=True, exist_ok=True)
+    _assistant_update_shipments_dir().mkdir(parents=True, exist_ok=True)
+
+
+def _thought_digested_dir() -> Path:
+    return THOUGHT_BOX_DIR / "digested"
+
+
+def _thought_archived_dir() -> Path:
+    return THOUGHT_BOX_DIR / "archived"
+
+
+def _assistant_update_shipments_dir() -> Path:
+    return WORKLOG_ROOT / "05-release-notes/assistant-update-shipments"
 
 
 def _slugify_title(value: str) -> str:
@@ -491,6 +508,143 @@ def _thought_box_items(digested_only: bool | None = None) -> list[dict[str, str]
     return items
 
 
+def _move_thought(path: Path, destination_dir: Path) -> Path:
+    _ensure_thought_box_dir()
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    destination = destination_dir / path.name
+    shutil.move(str(path), str(destination))
+    return destination
+
+
+def _thought_item_fingerprint(item: dict[str, str]) -> str:
+    return item.get("thought_fingerprint") or hashlib.sha256(item.get("raw_text", "").strip().encode("utf-8")).hexdigest()[:16]
+
+
+def _worklog_item_filename(title: str) -> str:
+    return f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}-{_slugify_title(title)}.md"
+
+
+def _render_worklog_item(item: dict[str, object], source_thoughts: list[str]) -> str:
+    return "\n".join(
+        [
+            f"# {item['title']}",
+            "",
+            f"- Type: {item['type']}",
+            f"- App/Project: {item['app_project']}",
+            f"- Priority: {item['priority']}",
+            f"- Status: new",
+            f"- Created At: {datetime.now(timezone.utc).isoformat()}",
+            f"- Source Thought(s): {', '.join(source_thoughts)}",
+            "",
+            "## Plain English Summary",
+            str(item.get("plain_english_summary") or "TBD"),
+            "",
+            "## Why It Matters",
+            {
+                "bug": "This blocks reliable operation or creates user friction.",
+                "feature": "This adds capability that supports the Worklog workflow.",
+                "support": "This keeps the Worklog usable and reduces operational overhead.",
+            }.get(str(item["type"]), "This is a tracked follow-up from the assistant."),
+            "",
+            "## Suggested Next Action",
+            str(item.get("suggested_next_action") or "TBD"),
+            "",
+            "## Source Thought(s)",
+            *[f"- {ref}" for ref in source_thoughts],
+            "",
+        ]
+    )
+
+
+def _create_worklog_item_from_proposal(item: dict[str, object]) -> Path:
+    destination = WORKLOG_ROOT / str(item["destination_folder"])
+    destination.mkdir(parents=True, exist_ok=True)
+    path = destination / _worklog_item_filename(str(item["title"]))
+    path.write_text(_render_worklog_item(item, [str(ref) for ref in item.get("source_thoughts", [])]), encoding="utf-8")
+    return path
+
+
+def _thoughts_by_paths(paths: list[str]) -> list[dict[str, str]]:
+    wanted = set(paths)
+    items = []
+    for item in _thought_box_items(digested_only=False):
+        if item.get("path") in wanted:
+            items.append(item)
+    return items
+
+
+def _digest_groups_from_items(items: list[dict[str, str]]) -> dict[str, object]:
+    preview = _digest_preview(items)
+    proposals = preview.get("proposed_items", [])
+    seen = set()
+    deduped = []
+    for proposal in proposals:
+        key = (
+            proposal.get("title"),
+            proposal.get("destination_folder"),
+            proposal.get("app_project"),
+            proposal.get("type"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(proposal)
+    preview["proposed_items"] = deduped
+    preview["digest_id"] = hashlib.sha256(
+        json.dumps([item.get("path") for item in items], sort_keys=True).encode("utf-8")
+    ).hexdigest()[:16]
+    preview["source_thoughts"] = [item.get("path") for item in items]
+    preview["update_bundle_title"] = "Worklog Assistant Update"
+    preview["update_status"] = "proposed"
+    return preview
+
+
+def _assistant_update_shipments() -> list[dict[str, str]]:
+    _ensure_thought_box_dir()
+    shipments: list[dict[str, str]] = []
+    for path in sorted(_assistant_update_shipments_dir().glob("*.md"), reverse=True):
+        text = path.read_text(encoding="utf-8")
+        shipments.append(
+            {
+                "path": str(path.relative_to(WORKLOG_ROOT)),
+                "title": path.stem.replace("-", " ").title(),
+                "excerpt": _first_nonempty_paragraph(text) or "Shipped/live update bundle.",
+                "mtime_display": _format_file_timestamp(path),
+            }
+        )
+    return shipments
+
+
+def _write_update_shipment_record(preview: dict[str, object], created_items: list[str], moved_paths: list[str]) -> Path:
+    _assistant_update_shipments_dir().mkdir(parents=True, exist_ok=True)
+    title = str(preview.get("update_bundle_title") or "Worklog Assistant Update")
+    path = _assistant_update_shipments_dir() / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H%M%S')}-{_slugify_title(title)}.md"
+    path.write_text(
+        "\n".join(
+            [
+                f"# {title}",
+                "",
+                f"- status: shipped/live",
+                f"- created_at: {datetime.now(timezone.utc).isoformat()}",
+                f"- source_thought_count: {len(preview.get('source_thoughts', []))}",
+                f"- created_work_items: {len(created_items)}",
+                "",
+                "## Summary",
+                str(preview.get("plain_summary") or "Approved and routed Worklog update."),
+                "",
+                "## Routed Work Items",
+                *([f"- {item}" for item in created_items] or ["- None"]),
+                "",
+                "## Source Thought Files",
+                *([f"- {item}" for item in moved_paths] or ["- None"]),
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _write_thought_file(raw_text: str) -> Path:
     _ensure_thought_box_dir()
     prefix = _thought_path_prefix()
@@ -498,6 +652,7 @@ def _write_thought_file(raw_text: str) -> Path:
     path = THOUGHT_BOX_DIR / f"{prefix}-{slug}.md"
     title = raw_text.strip().splitlines()[0][:80] if raw_text.strip() else "Thought"
     inferred = _infer_thought(raw_text)
+    fingerprint = hashlib.sha256(raw_text.strip().encode("utf-8")).hexdigest()[:16]
     content = "\n".join(
         [
             f"# {title}",
@@ -506,6 +661,7 @@ def _write_thought_file(raw_text: str) -> Path:
             "- source: David",
             "- status: raw",
             "- digest_status: not_digested",
+            f"- thought_fingerprint: {fingerprint}",
             f"- raw_text: {raw_text.strip()}",
             f"- ai_inferred_app: {inferred['ai_inferred_app']}",
             f"- ai_inferred_type: {inferred['ai_inferred_type']}",
@@ -624,19 +780,29 @@ def _call_openai_digest(items: list[dict[str, str]]) -> dict[str, object] | None
 def _infer_thought(raw_text: str) -> dict[str, str]:
     text = raw_text.lower()
     app_guess = ""
-    for candidate in ["ims", "dispatch", "cy storage", "core", "unity", "parking", "hiring", "worklog"]:
+    app_labels = {
+        "ims": "IMS",
+        "dispatch": "Dispatch",
+        "cy storage": "CY Storage",
+        "core": "Core",
+        "unity": "Unity",
+        "parking": "Parking",
+        "hiring": "Hiring",
+        "worklog": "Worklog",
+    }
+    for candidate, label in app_labels.items():
         if candidate in text:
-            app_guess = candidate.title() if candidate != "cy storage" else "CY Storage"
+            app_guess = label
             break
     type_guess = ""
-    if any(word in text for word in ["bug", "broken", "error", "fail", "issue"]):
+    if any(word in text for word in ["feature", "request", "add", "should", "would like", "break bulk"]):
+        type_guess = "feature"
+    elif any(word in text for word in ["bug", "broken", "error", "fail", "issue"]):
         type_guess = "bug"
     elif any(word in text for word in ["block", "blocked", "can't", "cannot", "need"]):
         type_guess = "blocker"
     elif any(word in text for word in ["support", "help", "question"]):
         type_guess = "support"
-    elif any(word in text for word in ["feature", "request", "add", "should", "would like"]):
-        type_guess = "feature"
     else:
         type_guess = "thought"
     return {
@@ -651,23 +817,67 @@ def _digest_preview(items: list[dict[str, str]]) -> dict[str, object]:
     if openai_preview:
         openai_preview["kb_context_excerpt"] = _kb_reference_text()[:6000]
         return openai_preview
-    buckets = Counter()
-    grouped: dict[str, list[str]] = {}
-    likely_bugs: list[str] = []
-    likely_features: list[str] = []
-    likely_blockers: list[str] = []
+    grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
     for item in items:
         raw = item.get("raw_text", "")
         inferred = _infer_thought(raw)
-        app_name = inferred["ai_inferred_app"] or "Unclear"
-        grouped.setdefault(app_name, []).append(raw)
-        buckets[app_name] += 1
-        if inferred["ai_inferred_type"] == "bug":
-            likely_bugs.append(raw)
-        elif inferred["ai_inferred_type"] == "feature":
-            likely_features.append(raw)
-        elif inferred["ai_inferred_type"] == "blocker":
-            likely_blockers.append(raw)
+        key = inferred["ai_inferred_app"] or "Unclear"
+        grouped[key].append({**item, **inferred})
+
+    proposed_items: list[dict[str, object]] = []
+    for app_name, group in grouped.items():
+        by_type: dict[str, list[dict[str, str]]] = defaultdict(list)
+        for thought in group:
+            by_type[thought.get("ai_inferred_type") or "thought"].append(thought)
+        for inferred_type, thoughts in by_type.items():
+            if inferred_type == "thought" and len(thoughts) == 1:
+                continue
+            source_refs = [thought["path"] for thought in thoughts]
+            combined_text = " ".join(thought.get("raw_text", "") for thought in thoughts).strip()
+            title = f"{app_name} {inferred_type.title()} follow-up".strip()
+            destination = {
+                "bug": "04-inbox/bugs",
+                "feature": "04-inbox/features",
+                "support": "04-inbox/support",
+                "blocker": "04-inbox/new",
+                "thought": "04-inbox/new",
+            }.get(inferred_type, "04-inbox/new")
+            priority = "high" if inferred_type in {"bug", "blocker"} else "medium"
+            proposed_items.append(
+                {
+                    "title": title,
+                    "destination_folder": destination,
+                    "type": inferred_type if inferred_type in {"bug", "feature", "support"} else "note",
+                    "app_project": app_name or "worklog",
+                    "priority": priority,
+                    "plain_english_summary": combined_text[:240] or title,
+                    "suggested_next_action": f"Review the {app_name or 'Worklog'} thought(s) and convert into a tracked item.",
+                    "source_thoughts": source_refs,
+                }
+            )
+
+    if not proposed_items:
+        for item in items:
+            raw = item.get("raw_text", "")
+            inferred = _infer_thought(raw)
+            proposed_items.append(
+                {
+                    "title": (inferred["ai_inferred_app"] or "Worklog") + " follow-up",
+                    "destination_folder": {
+                        "bug": "04-inbox/bugs",
+                        "feature": "04-inbox/features",
+                        "support": "04-inbox/support",
+                        "blocker": "04-inbox/new",
+                    }.get(inferred["ai_inferred_type"], "04-inbox/new"),
+                    "type": inferred["ai_inferred_type"] if inferred["ai_inferred_type"] in {"bug", "feature", "support"} else "note",
+                    "app_project": inferred["ai_inferred_app"] or "worklog",
+                    "priority": "medium",
+                    "plain_english_summary": raw[:240],
+                    "suggested_next_action": "Review this thought and decide whether it should become a Worklog item.",
+                    "source_thoughts": [item.get("path", "")],
+                }
+            )
+
     prompt = "\n".join(
         [
             "You are the FSFT Worklog Assistant.",
@@ -678,15 +888,11 @@ def _digest_preview(items: list[dict[str, str]]) -> dict[str, object]:
     )
     return {
         "plain_summary": f"{len(items)} undigested thought item(s) ready for review.",
-        "grouped_by_app": dict(buckets),
-        "likely_bugs": likely_bugs[:5],
-        "likely_features": likely_features[:5],
-        "likely_blockers": likely_blockers[:5],
-        "recommended_worklog_items": [
-            *(f"Bug: {text[:140]}" for text in likely_bugs[:3]),
-            *(f"Feature: {text[:140]}" for text in likely_features[:3]),
-            *(f"Blocker: {text[:140]}" for text in likely_blockers[:3]),
-        ],
+        "grouped_by_app": {app: len(thoughts) for app, thoughts in grouped.items()},
+        "likely_bugs": [item["plain_english_summary"] for item in proposed_items if item["type"] == "bug"][:5],
+        "likely_features": [item["plain_english_summary"] for item in proposed_items if item["type"] == "feature"][:5],
+        "likely_blockers": [item["plain_english_summary"] for item in proposed_items if item["destination_folder"] == "04-inbox/new" and item["priority"] == "high"][:5],
+        "proposed_items": proposed_items,
         "recommended_codex_prompt": prompt,
         "kb_context_excerpt": _kb_reference_text()[:6000],
     }
@@ -1165,16 +1371,23 @@ def intake():
 @app.route("/assistant")
 @_require_worklog_session
 def assistant():
-    conversation = _thought_box_items()[:12]
+    conversation = _thought_box_items(digested_only=False)[:12]
     digest_preview = None
     if request.args.get("digest_preview") == "1":
-        digest_preview = _digest_preview(_thought_box_items(digested_only=False))
+        digest_preview = _digest_groups_from_items(_thought_box_items(digested_only=False))
     return render_template(
         "assistant.html",
         conversation=conversation,
         digest_preview=digest_preview,
+        update_shipments=_assistant_update_shipments(),
         openai_enabled=_openai_available(),
     )
+
+
+@app.route("/api/assistant/thoughts")
+@_require_worklog_session
+def assistant_thoughts():
+    return {"thoughts": _thought_box_items(digested_only=False)}
 
 
 @app.route("/api/assistant/message", methods=["POST"])
@@ -1184,6 +1397,14 @@ def assistant_message():
     message = (payload.get("message") or "").strip()
     if not message:
         return {"error": "message is required"}, 400
+    if message.lower() == "digest my thought box":
+        preview = _digest_groups_from_items(_thought_box_items(digested_only=False))
+        return {
+            "ok": True,
+            "assistant_reply": "Digest preview prepared. Review the proposal before approving.",
+            "digest_preview": preview,
+            "created_raw_thought": False,
+        }
     thought_path = _write_thought_file(message)
     inferred = _infer_thought(message)
     data = {
@@ -1193,15 +1414,104 @@ def assistant_message():
         "digest_status": "not_digested",
         **inferred,
     }
-    if "digest my thought box" in message.lower():
-        preview = _digest_preview(_thought_box_items(digested_only=False))
-        data["digest_preview"] = preview
-        data["assistant_reply"] = "I saved that thought and prepared a digest preview. No files were moved."
-    elif _openai_available():
+    if _openai_available():
         data["assistant_reply"] = "I saved that thought. OpenAI-backed digestion is available, but the assistant stays scoped to Worklog and KB context."
     else:
         data["assistant_reply"] = _safe_openai_error()
     return data
+
+
+@app.route("/api/assistant/digest-preview", methods=["POST"])
+@_require_worklog_session
+def assistant_digest_preview():
+    payload = request.get_json(silent=True) or {}
+    thought_paths = payload.get("thought_paths") or []
+    if thought_paths:
+        thoughts = _thoughts_by_paths([str(path) for path in thought_paths])
+    else:
+        thoughts = _thought_box_items(digested_only=False)
+    preview = _digest_groups_from_items(thoughts)
+    return {"ok": True, "digest_preview": preview, "thought_count": len(thoughts)}
+
+
+@app.route("/api/assistant/approve-digest", methods=["POST"])
+@_require_worklog_session
+def assistant_approve_digest():
+    payload = request.get_json(silent=True) or {}
+    preview = payload.get("digest_preview") or {}
+    source_paths = [str(path) for path in preview.get("source_thoughts", [])]
+    thoughts = _thoughts_by_paths(source_paths)
+    if not thoughts:
+        return {"ok": False, "error": "No active thoughts available for approval."}, 400
+
+    by_path = {item["path"]: item for item in thoughts}
+    created_items: list[str] = []
+    moved_paths: list[str] = []
+    for proposal in preview.get("proposed_items", []):
+        proposal_paths = [str(path) for path in proposal.get("source_thoughts", [])]
+        active_thoughts = [by_path[path] for path in proposal_paths if path in by_path]
+        if not active_thoughts:
+            continue
+        fingerprints = {_thought_item_fingerprint(item) for item in active_thoughts}
+        if len(fingerprints) == 0:
+            continue
+        if proposal.get("destination_folder") == "04-inbox/thought-box/digested":
+            continue
+        worklog_path = _create_worklog_item_from_proposal(proposal)
+        created_items.append(str(worklog_path.relative_to(WORKLOG_ROOT)))
+        for thought in active_thoughts:
+            source_file = WORKLOG_ROOT / thought["path"]
+            if not source_file.exists():
+                continue
+            destination = _move_thought(source_file, _thought_digested_dir())
+            moved_paths.append(str(destination.relative_to(WORKLOG_ROOT)))
+
+    record_path = THOUGHT_BOX_DIR / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H%M%S')}-digest-record.md"
+    created_lines = [f"- {item}" for item in created_items] or ["- None"]
+    moved_lines = [f"- {item}" for item in moved_paths] or ["- None"]
+    record_path.write_text(
+        "\n".join(
+            [
+                "# Assistant Digest Record",
+                "",
+                f"- created_at: {datetime.now(timezone.utc).isoformat()}",
+                f"- source_count: {len(thoughts)}",
+                f"- created_items: {len(created_items)}",
+                "",
+                "## Created Worklog Items",
+                *created_lines,
+                "",
+                "## Moved Thought Files",
+                *moved_lines,
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    update_record = _write_update_shipment_record(preview, created_items, moved_paths)
+
+    return {
+        "ok": True,
+        "created_items": created_items,
+        "moved_thoughts": moved_paths,
+        "update_shipment": str(update_record.relative_to(WORKLOG_ROOT)),
+        "assistant_reply": "Digest approved. Routed items were created and raw thoughts were moved to digested.",
+    }
+
+
+@app.route("/api/assistant/archive-thought", methods=["POST"])
+@_require_worklog_session
+def assistant_archive_thought():
+    payload = request.get_json(silent=True) or {}
+    thought_path = str(payload.get("thought_path") or "").strip()
+    if not thought_path:
+        return {"ok": False, "error": "thought_path is required"}, 400
+    source = WORKLOG_ROOT / thought_path
+    if not source.exists():
+        return {"ok": False, "error": "thought not found"}, 404
+    destination = _move_thought(source, _thought_archived_dir())
+    return {"ok": True, "archived_path": str(destination.relative_to(WORKLOG_ROOT))}
 
 
 @app.route("/view/<path:relative_path>")

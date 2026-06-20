@@ -35,6 +35,9 @@ class WorklogAssistantTests(unittest.TestCase):
             "04-inbox/features",
             "04-inbox/support",
             "04-inbox/thought-box",
+            "04-inbox/thought-box/digested",
+            "04-inbox/thought-box/archived",
+            "05-release-notes/assistant-update-shipments",
         ]:
             (self.root / rel).mkdir(parents=True, exist_ok=True)
         (self.root / "00-dashboard/current-focus.md").write_text("# Current Focus\n\n- Keep the day simple.\n", encoding="utf-8")
@@ -83,6 +86,7 @@ class WorklogAssistantTests(unittest.TestCase):
         response = self._client().get("/assistant")
         self.assertEqual(response.status_code, 200)
         self.assertIn("Worklog Assistant", response.get_data(as_text=True))
+        self.assertIn("Active thought table", response.get_data(as_text=True))
 
     def test_message_stores_raw_thought(self) -> None:
         response = self._client().post(
@@ -116,7 +120,7 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(before, after)
         self.assertIn("Digest preview", response.get_data(as_text=True))
-        self.assertIn("Likely features", response.get_data(as_text=True))
+        self.assertIn("Proposed items", response.get_data(as_text=True))
 
     def test_digest_preview_does_not_move_files(self) -> None:
         thought = self.root / "04-inbox/thought-box/2026-06-20-110000-general.md"
@@ -127,6 +131,66 @@ class WorklogAssistantTests(unittest.TestCase):
         _ = self._client().get("/assistant?digest_preview=1")
         self.assertTrue(thought.exists())
         self.assertEqual(thought.parent.name, "thought-box")
+
+    def test_digest_command_does_not_create_raw_thought(self) -> None:
+        response = self._client().post("/api/assistant/message", json={"message": "digest my thought box"})
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertFalse(body["created_raw_thought"])
+        self.assertIn("digest_preview", body)
+        self.assertEqual(list((self.root / "04-inbox/thought-box").glob("*.md")), [])
+
+    def test_no_thoughts_empty_state_works(self) -> None:
+        response = self._client().get("/assistant")
+        html = response.get_data(as_text=True)
+        self.assertIn("No active raw thoughts yet.", html)
+
+    def test_approve_digest_creates_items_and_moves_thoughts(self) -> None:
+        thought1 = self.root / "04-inbox/thought-box/2026-06-20-100000-ims.md"
+        thought1.write_text(
+            "# IMS\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs break bulk handling.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs break bulk handling.\n",
+            encoding="utf-8",
+        )
+        thought2 = self.root / "04-inbox/thought-box/2026-06-20-100001-ims-2.md"
+        thought2.write_text(
+            "# IMS 2\n\n- created_at: 2026-06-20T10:00:01Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs break bulk handling.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs break bulk handling.\n",
+            encoding="utf-8",
+        )
+        preview = self._client().post("/api/assistant/digest-preview", json={}).get_json()["digest_preview"]
+        response = self._client().post("/api/assistant/approve-digest", json={"digest_preview": preview})
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertTrue(body["created_items"])
+        self.assertTrue(body["moved_thoughts"])
+        self.assertTrue(list((self.root / "04-inbox/features").glob("*.md")))
+        self.assertTrue(list((self.root / "04-inbox/thought-box/digested").glob("*.md")))
+        self.assertTrue(list((self.root / "05-release-notes/assistant-update-shipments").glob("*.md")))
+        html = self._client().get("/assistant").get_data(as_text=True)
+        self.assertIn("No active raw thoughts yet.", html)
+
+    def test_update_bundle_tracked_separately(self) -> None:
+        thought = self.root / "04-inbox/thought-box/2026-06-20-130000-ims.md"
+        thought.write_text(
+            "# IMS\n\n- created_at: 2026-06-20T13:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs a barcode update.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs a barcode update.\n",
+            encoding="utf-8",
+        )
+        preview = self._client().post("/api/assistant/digest-preview", json={}).get_json()["digest_preview"]
+        response = self._client().post("/api/assistant/approve-digest", json={"digest_preview": preview})
+        self.assertEqual(response.status_code, 200)
+        update_files = list((self.root / "05-release-notes/assistant-update-shipments").glob("*.md"))
+        self.assertEqual(len(update_files), 1)
+        self.assertIn("shipped/live", update_files[0].read_text(encoding="utf-8"))
+
+    def test_archive_thought_moves_raw_file(self) -> None:
+        thought = self.root / "04-inbox/thought-box/2026-06-20-120000-note.md"
+        thought.write_text(
+            "# Note\n\n- created_at: 2026-06-20T12:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Archive this.\n",
+            encoding="utf-8",
+        )
+        response = self._client().post("/api/assistant/archive-thought", json={"thought_path": "04-inbox/thought-box/2026-06-20-120000-note.md"})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(thought.exists())
+        self.assertTrue((self.root / "04-inbox/thought-box/archived/2026-06-20-120000-note.md").exists())
 
 
 if __name__ == "__main__":

@@ -6,7 +6,8 @@
       <div>
         <div class="eyebrow text-uppercase text-secondary small fw-semibold mb-2">Worklog Assistant</div>
         <h1 class="h2 mb-2">Chat with your Worklog memory</h1>
-        <p class="text-secondary mb-0">Limited to FSFT Worklog and KB context. Capture first. Classify later. Digest before acting.</p>
+        <p class="text-secondary mb-0">Capture first. Group second. Digest third. Approve fourth. Ship fifth. Nothing moves until David approves it.</p>
+        <div class="text-secondary small mt-2">Worklog turns raw thoughts into fixes, features, and updates.</div>
       </div>
       <div class="text-lg-end">
         <div class="badge {% if openai_enabled %}text-bg-success{% else %}text-bg-warning{% endif %} mb-2">
@@ -14,8 +15,73 @@
         </div>
         <div class="d-flex flex-wrap gap-2 justify-content-lg-end">
           <a class="btn btn-outline-primary btn-sm" href="{{ url_for('dashboard') }}">Back to dashboard</a>
-          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('assistant', digest_preview=1) }}">Digest preview</a>
+          <button class="btn btn-outline-secondary btn-sm" type="button" id="digest-button">Digest Thought Box</button>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card card-shadow border-0 mb-4">
+    <div class="card-body p-4 p-xl-5">
+      <form id="assistant-form" class="assistant-form">
+        <div class="text-secondary small fw-semibold text-uppercase mb-2">Chat</div>
+        <textarea class="form-control assistant-input mb-3" rows="5" name="message" placeholder="hey for IMS we need to do x, y, z"></textarea>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+          <button class="btn btn-primary btn-lg" type="submit">Send</button>
+          <button class="btn btn-outline-secondary btn-lg" type="button" id="digest-button-inline">Digest my thought box</button>
+          <div id="assistant-status" class="text-secondary small"></div>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section class="card card-shadow border-0 mb-4">
+    <div class="card-body p-4 p-xl-5">
+      <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-end mb-3">
+        <div>
+          <div class="text-secondary small fw-semibold text-uppercase mb-2">Active thought table</div>
+          <h2 class="h3 mb-1">Thoughts waiting in the box</h2>
+          <div class="text-secondary">Thought Box = incoming thoughts. These are the raw pallets David has not approved for routing yet.</div>
+        </div>
+        <div class="text-secondary small">{{ conversation|length }} active raw thought{{ '' if conversation|length == 1 else 's' }}</div>
+      </div>
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Created</th>
+              <th>Thought</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="thought-table-body">
+            {% if conversation %}
+              {% for item in conversation %}
+                <tr data-thought-path="{{ item.path }}">
+                  <td class="text-nowrap">{{ item.created_at or item.mtime_display or 'Unknown' }}</td>
+                  <td>
+                    <div class="fw-semibold">{{ item.title }}</div>
+                    <div class="text-secondary small">{{ item.raw_text[:180] if item.raw_text else 'No raw text recorded.' }}</div>
+                  </td>
+                  <td>
+                    <span class="badge text-bg-warning">{{ item.digest_status or 'not_digested' }}</span>
+                    {% if item.ai_inferred_app %}<span class="badge text-bg-light border ms-1">{{ item.ai_inferred_app }}</span>{% endif %}
+                  </td>
+                  <td>
+                    <div class="d-flex flex-wrap gap-2">
+                      <a class="btn btn-outline-primary btn-sm" href="{{ url_for('view_file', relative_path=item.path) }}">View</a>
+                      <button class="btn btn-outline-secondary btn-sm archive-button" type="button" data-thought-path="{{ item.path }}">Archive</button>
+                      <button class="btn btn-outline-secondary btn-sm reviewed-button" type="button" data-thought-path="{{ item.path }}">Mark reviewed</button>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr><td colspan="4" class="text-secondary">No active raw thoughts yet.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
       </div>
     </div>
   </section>
@@ -24,29 +90,19 @@
     <div class="col-12 col-xl-7">
       <div class="card card-shadow border-0 h-100">
         <div class="card-body p-4 p-xl-5">
-          <div class="text-secondary small fw-semibold text-uppercase mb-3">Conversation</div>
-          <div class="assistant-panel mb-4">
+          <div class="text-secondary small fw-semibold text-uppercase mb-3">Conversation log</div>
+          <div id="conversation-log" class="assistant-panel">
             {% if conversation %}
               {% for item in conversation %}
                 <div class="chat-turn user-turn">
                   <div class="chat-label">David</div>
-                  <div class="chat-bubble">{{ item.raw_text or item.raw or item.raw_text }}</div>
+                  <div class="chat-bubble">{{ item.raw_text or 'No raw text recorded.' }}</div>
                 </div>
               {% endfor %}
             {% else %}
-              <div class="text-secondary">No thoughts yet. Type one below.</div>
+              <div class="text-secondary">No thoughts yet. Send one above.</div>
             {% endif %}
           </div>
-
-          <form id="assistant-form" class="assistant-form">
-            <textarea class="form-control assistant-input mb-3" rows="6" name="message" placeholder="hey for IMS we need to do x, y, z"></textarea>
-            <div class="d-flex flex-wrap gap-2 align-items-center">
-              <button class="btn btn-primary btn-lg" type="submit">Send</button>
-              <button class="btn btn-outline-secondary btn-lg" type="button" id="digest-button">Digest my thought box</button>
-              <div class="text-secondary small">Every message is stored as raw thought first.</div>
-            </div>
-          </form>
-          <div id="assistant-status" class="mt-3 text-secondary small"></div>
         </div>
       </div>
     </div>
@@ -54,19 +110,57 @@
     <div class="col-12 col-xl-5">
       <div class="card card-shadow border-0 h-100">
         <div class="card-body p-4 p-xl-5">
-          <div class="text-secondary small fw-semibold text-uppercase mb-3">Digest preview</div>
-          {% if digest_preview %}
-            <div class="mb-3"><strong>Plain-English summary:</strong> {{ digest_preview.plain_summary }}</div>
-            <div class="mb-3"><strong>Grouped by app:</strong> {{ digest_preview.grouped_by_app }}</div>
-            <div class="mb-3"><strong>Likely bugs:</strong> {{ digest_preview.likely_bugs }}</div>
-            <div class="mb-3"><strong>Likely features:</strong> {{ digest_preview.likely_features }}</div>
-            <div class="mb-3"><strong>Likely blockers:</strong> {{ digest_preview.likely_blockers }}</div>
-            <div class="mb-3"><strong>Recommended Worklog items:</strong> {{ digest_preview.recommended_worklog_items }}</div>
-            <div class="mb-3"><strong>Recommended Codex prompt:</strong><pre class="assistant-pre">{{ digest_preview.recommended_codex_prompt }}</pre></div>
-          {% else %}
-            <div class="text-secondary">Ask for a digest preview after capturing raw thoughts.</div>
-          {% endif %}
+          <div class="text-secondary small fw-semibold text-uppercase mb-3">Thought Order digest</div>
+          <div id="digest-preview-empty" class="{% if digest_preview %}d-none{% endif %} text-secondary">Ask for a digest preview after capturing raw thoughts.</div>
+          <div id="digest-preview-body" class="{% if not digest_preview %}d-none{% endif %}">
+            {% if digest_preview %}
+              <div class="mb-3"><strong>Summary:</strong> <span id="digest-summary">{{ digest_preview.plain_summary }}</span></div>
+              <div class="mb-3"><strong>Grouped by app:</strong> <span id="digest-grouped">{{ digest_preview.grouped_by_app }}</span></div>
+              <div class="mb-3"><strong>Recommended Codex prompt:</strong><pre class="assistant-pre" id="digest-codex">{{ digest_preview.recommended_codex_prompt }}</pre></div>
+              <div class="mb-3">
+                <strong>Proposed items:</strong>
+                <span class="text-secondary">Worklog routing suggestions for approval.</span>
+                <div id="proposed-item-list">
+                  {% for item in digest_preview.proposed_items %}
+                    <div class="proposal-card mt-3">
+                      <div class="fw-semibold">{{ item.title }}</div>
+                      <div class="text-secondary small">Destination: {{ item.destination_folder }} · App: {{ item.app_project }} · Priority: {{ item.priority }}</div>
+                      <div class="text-secondary small mt-1">{{ item.plain_english_summary }}</div>
+                      <div class="text-secondary small mt-1">Next: {{ item.suggested_next_action }}</div>
+                      <div class="text-secondary small mt-1">Sources: {{ item.source_thoughts }}</div>
+                      <div class="text-secondary small mt-1">Type: {{ item.type }}</div>
+                    </div>
+                  {% endfor %}
+                </div>
+              </div>
+            {% endif %}
+          </div>
+          <div id="digest-actions" class="d-flex flex-wrap gap-2 {% if not digest_preview %}d-none{% endif %}">
+            <button class="btn btn-primary" type="button" id="approve-digest-button">Approve Digest and Route Items</button>
+            <button class="btn btn-outline-secondary" type="button" id="cancel-digest-button">Cancel / Keep Thoughts Raw</button>
+          </div>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card card-shadow border-0 mt-4">
+    <div class="card-body p-4 p-xl-5">
+      <div class="text-secondary small fw-semibold text-uppercase mb-3">Updates</div>
+      <h2 class="h4 mb-2">Shipped / live bundles</h2>
+      <div class="text-secondary mb-3">Approved bundles become updates, and completed updates are marked shipped/live separately from the Thought Box.</div>
+      <div class="row g-3">
+        {% for update in update_shipments %}
+          <div class="col-12 col-xl-6">
+            <div class="proposal-card h-100">
+              <div class="fw-semibold">{{ update.title }}</div>
+              <div class="text-secondary small">{{ update.mtime_display }} · {{ update.path }}</div>
+              <div class="text-secondary small mt-2">{{ update.excerpt }}</div>
+            </div>
+          </div>
+        {% else %}
+          <div class="col-12"><div class="text-secondary">No shipped updates yet.</div></div>
+        {% endfor %}
       </div>
     </div>
   </section>
@@ -75,9 +169,89 @@
 <script>
 (() => {
   const form = document.getElementById('assistant-form');
-  const button = document.getElementById('digest-button');
+  const digestButton = document.getElementById('digest-button');
+  const digestInline = document.getElementById('digest-button-inline');
+  const approveButton = document.getElementById('approve-digest-button');
+  const cancelButton = document.getElementById('cancel-digest-button');
   const status = document.getElementById('assistant-status');
   const input = form.querySelector('textarea[name="message"]');
+  const previewBody = document.getElementById('digest-preview-body');
+  const previewEmpty = document.getElementById('digest-preview-empty');
+  const summaryEl = document.getElementById('digest-summary');
+  const groupedEl = document.getElementById('digest-grouped');
+  const codexEl = document.getElementById('digest-codex');
+  const proposedList = document.getElementById('proposed-item-list');
+  const actionBar = document.getElementById('digest-actions');
+  const approveButton = document.getElementById('approve-digest-button');
+  const cancelButton = document.getElementById('cancel-digest-button');
+  const thoughtTable = document.getElementById('thought-table-body');
+  const conversationLog = document.getElementById('conversation-log');
+  let digestPreview = {{ digest_preview | tojson if digest_preview else 'null' }};
+
+  function renderPreview(data) {
+    digestPreview = data;
+    previewEmpty.classList.add('d-none');
+    previewBody.classList.remove('d-none');
+    summaryEl.textContent = data.plain_summary || '';
+    groupedEl.textContent = JSON.stringify(data.grouped_by_app || {}, null, 2);
+    codexEl.textContent = data.recommended_codex_prompt || '';
+    proposedList.innerHTML = '';
+    (data.proposed_items || []).forEach((item) => {
+      const div = document.createElement('div');
+      div.className = 'proposal-card mt-3';
+      div.innerHTML = `
+        <div class="fw-semibold">${item.title || ''}</div>
+        <div class="text-secondary small">Destination: ${item.destination_folder || ''} · App: ${item.app_project || ''} · Priority: ${item.priority || ''}</div>
+        <div class="text-secondary small mt-1">${item.plain_english_summary || ''}</div>
+        <div class="text-secondary small mt-1">Next: ${item.suggested_next_action || ''}</div>
+        <div class="text-secondary small mt-1">Sources: ${(item.source_thoughts || []).join(', ')}</div>
+      `;
+      proposedList.appendChild(div);
+    });
+    if (actionBar) actionBar.classList.remove('d-none');
+  }
+
+  async function refreshThoughts() {
+    const res = await fetch('{{ url_for("assistant_thoughts") }}');
+    const data = await res.json();
+    thoughtTable.innerHTML = '';
+    conversationLog.innerHTML = '';
+    if (!data.thoughts || !data.thoughts.length) {
+      thoughtTable.innerHTML = '<tr><td colspan="4" class="text-secondary">No active raw thoughts yet.</td></tr>';
+      conversationLog.innerHTML = '<div class="text-secondary">No thoughts yet. Send one above.</div>';
+      return;
+    }
+    data.thoughts.forEach((item) => {
+      const row = document.createElement('tr');
+      row.dataset.thoughtPath = item.path;
+      row.innerHTML = `
+        <td class="text-nowrap">${item.created_at || item.mtime_display || 'Unknown'}</td>
+        <td>
+          <div class="fw-semibold">${item.title || ''}</div>
+          <div class="text-secondary small">${(item.raw_text || '').slice(0, 180) || 'No raw text recorded.'}</div>
+        </td>
+        <td>
+          <span class="badge text-bg-warning">${item.digest_status || 'not_digested'}</span>
+          ${item.ai_inferred_app ? `<span class="badge text-bg-light border ms-1">${item.ai_inferred_app}</span>` : ''}
+        </td>
+        <td>
+          <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-outline-primary btn-sm" href="/view/${item.path}">View</a>
+            <button class="btn btn-outline-secondary btn-sm archive-button" type="button" data-thought-path="${item.path}">Archive</button>
+            <button class="btn btn-outline-secondary btn-sm reviewed-button" type="button" data-thought-path="${item.path}">Mark reviewed</button>
+          </div>
+        </td>
+      `;
+      thoughtTable.appendChild(row);
+
+      const turn = document.createElement('div');
+      turn.className = 'chat-turn user-turn';
+      turn.innerHTML = `<div class="chat-label">David</div><div class="chat-bubble">${(item.raw_text || 'No raw text recorded.')}</div>`;
+      conversationLog.appendChild(turn);
+    });
+    bindRowButtons();
+  }
+
   async function sendMessage(message) {
     status.textContent = 'Thinking...';
     const res = await fetch('{{ url_for("assistant_message") }}', {
@@ -91,13 +265,93 @@
       return;
     }
     status.textContent = data.assistant_reply || 'Saved.';
-    window.setTimeout(() => window.location.reload(), 300);
+    if (data.digest_preview) {
+      renderPreview(data.digest_preview);
+    }
+    input.value = '';
+    await refreshThoughts();
   }
+
+  async function requestDigest() {
+    status.textContent = 'Building digest preview...';
+    const res = await fetch('{{ url_for("assistant_digest_preview") }}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({thought_paths: []}),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      status.textContent = data.error || 'Digest preview failed.';
+      return;
+    }
+    renderPreview(data.digest_preview);
+    status.textContent = 'Digest preview ready. Review the proposal before approving.';
+  }
+
+  async function approveDigest() {
+    if (!digestPreview) {
+      status.textContent = 'Build a digest preview first.';
+      return;
+    }
+    status.textContent = 'Routing approved items...';
+    const res = await fetch('{{ url_for("assistant_approve_digest") }}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({digest_preview: digestPreview}),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      status.textContent = data.error || 'Approval failed.';
+      return;
+    }
+    status.textContent = data.assistant_reply || 'Digest approved.';
+    digestPreview = null;
+    previewBody.classList.add('d-none');
+    previewEmpty.classList.remove('d-none');
+    await refreshThoughts();
+  }
+
+  async function cancelDigest() {
+    digestPreview = null;
+    previewBody.classList.add('d-none');
+    previewEmpty.classList.remove('d-none');
+    if (actionBar) actionBar.classList.add('d-none');
+    status.textContent = 'Digest cleared. Raw thoughts kept.';
+  }
+
+  async function archiveThought(path) {
+    const res = await fetch('{{ url_for("assistant_archive_thought") }}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({thought_path: path}),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      status.textContent = data.error || 'Archive failed.';
+      return;
+    }
+    status.textContent = 'Thought archived.';
+    await refreshThoughts();
+  }
+
+  function bindRowButtons() {
+    document.querySelectorAll('.archive-button').forEach((button) => {
+      button.onclick = () => archiveThought(button.dataset.thoughtPath);
+    });
+    document.querySelectorAll('.reviewed-button').forEach((button) => {
+      button.onclick = () => status.textContent = 'Marked reviewed locally.';
+    });
+  }
+
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     sendMessage(input.value);
   });
-  button.addEventListener('click', () => sendMessage('digest my thought box'));
+  digestButton.addEventListener('click', requestDigest);
+  digestInline.addEventListener('click', requestDigest);
+  if (approveButton) approveButton.addEventListener('click', approveDigest);
+  if (cancelButton) cancelButton.addEventListener('click', cancelDigest);
+  bindRowButtons();
 })();
 </script>
 {% endblock %}
