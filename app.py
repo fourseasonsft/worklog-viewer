@@ -695,9 +695,10 @@ def _sprint_handoffs_dir() -> Path:
 
 
 def _sprints_dir(status: str | None = None) -> Path:
+    root = WORKLOG_ROOT / "06-sprints"
     if status:
-        return SPRINTS_ROOT_DIR / status.lower()
-    return SPRINTS_ROOT_DIR
+        return root / status.lower()
+    return root
 
 
 def _ensure_sprint_dirs() -> None:
@@ -820,7 +821,14 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
     status = meta.get("status") or path.parent.name
     app_product = meta.get("app_product") or "Other"
     sprint_id = meta.get("sprint_id") or path.stem.split("-", 1)[0]
-    title = path.stem.split("-", 1)[1].replace("-", " ").title() if "-" in path.stem else path.stem.title()
+    title = meta.get("title")
+    if not title:
+        for line in text.splitlines():
+            if line.startswith("# Sprint Queue Record: "):
+                title = line.split(":", 1)[1].strip()
+                break
+    if not title:
+        title = path.stem.split("-", 1)[1].replace("-", " ").title() if "-" in path.stem else path.stem.title()
     source_thoughts = []
     digested_source_thoughts = []
     proposed_work = []
@@ -916,6 +924,7 @@ def _parse_thought_file(path: Path) -> dict[str, str]:
         raw_lines.append(cleaned)
     data["display_snippet"] = " ".join(raw_lines[:3]).strip()
     data["created_display"] = _format_local_timestamp(datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc))
+    data["thought_id"] = data.get("thought_fingerprint") or hashlib.sha256(data.get("raw_text", "").strip().encode("utf-8")).hexdigest()[:16]
     return data
 
 
@@ -941,7 +950,7 @@ def _move_thought(path: Path, destination_dir: Path) -> Path:
 
 
 def _thought_item_fingerprint(item: dict[str, str]) -> str:
-    return item.get("thought_fingerprint") or hashlib.sha256(item.get("raw_text", "").strip().encode("utf-8")).hexdigest()[:16]
+    return item.get("thought_id") or item.get("thought_fingerprint") or hashlib.sha256(item.get("raw_text", "").strip().encode("utf-8")).hexdigest()[:16]
 
 
 def _worklog_item_filename(title: str) -> str:
@@ -997,6 +1006,15 @@ def _thoughts_by_paths(paths: list[str]) -> list[dict[str, str]]:
     return items
 
 
+def _thoughts_by_ids(ids: list[str]) -> list[dict[str, str]]:
+    wanted = set(ids)
+    items = []
+    for item in _thought_box_items(digested_only=False):
+        if _thought_item_fingerprint(item) in wanted:
+            items.append(item)
+    return items
+
+
 def _digest_groups_from_items(items: list[dict[str, str]]) -> dict[str, object]:
     preview = _digest_preview(items)
     proposals = preview.get("proposed_items", [])
@@ -1018,6 +1036,7 @@ def _digest_groups_from_items(items: list[dict[str, str]]) -> dict[str, object]:
         json.dumps([item.get("path") for item in items], sort_keys=True).encode("utf-8")
     ).hexdigest()[:16]
     preview["source_thoughts"] = [item.get("path") for item in items]
+    preview["source_thought_ids"] = [_thought_item_fingerprint(item) for item in items]
     preview["update_bundle_title"] = "Worklog Idea Update"
     preview["update_status"] = "proposed"
     return preview
@@ -1564,6 +1583,9 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
         "app_groups": app_groups,
         "sprint_groups": sprint_groups,
         "approved_handoffs": handoffs,
+        "source_thoughts": [item.get("path") for item in active_items],
+        "source_thought_paths": [item.get("path") for item in active_items],
+        "source_thought_ids": [_thought_item_fingerprint(item) for item in active_items],
         "recommended_codex_prompt": "Create a focused implementation conversation from the sprint group table. Keep each group small enough to start a new chat cleanly.",
     }
 
@@ -2190,17 +2212,32 @@ def assistant_message():
 @_require_worklog_session
 def assistant_digest_preview():
     payload = request.get_json(silent=True) or {}
-    thought_paths = payload.get("thought_paths") or []
+    thought_ids = [str(item) for item in (payload.get("thought_ids") or []) if str(item).strip()]
+    thought_paths = [str(item) for item in (payload.get("thought_paths") or []) if str(item).strip()]
     selected_only = bool(payload.get("selected_only"))
-    if thought_paths:
-        thoughts = _thoughts_by_paths([str(path) for path in thought_paths])
+    if thought_ids:
+        thoughts = _thoughts_by_ids(thought_ids)
+    elif thought_paths:
+        thoughts = _thoughts_by_paths(thought_paths)
     else:
         thoughts = _thought_box_items(digested_only=False)
-    if selected_only and not thoughts:
+    if selected_only and not (thought_ids or thought_paths):
         return {"ok": False, "error": "Select at least one raw idea before digesting."}, 400
+    active_thoughts = _thought_box_items(digested_only=False)
+    active_by_id = {_thought_item_fingerprint(item): item for item in active_thoughts}
+    active_by_path = {item["path"]: item for item in active_thoughts}
+    skipped_selected_ids = [thought_id for thought_id in thought_ids if thought_id not in active_by_id]
+    skipped_selected_paths = [path for path in thought_paths if path not in active_by_path]
+    if selected_only and not thoughts:
+        return {"ok": False, "error": "Selected idea IDs no longer match active raw ideas."}, 400
     preview = _digest_groups_from_items(thoughts)
-    preview["selection_mode"] = "selected" if thought_paths else "all"
+    preview["selection_mode"] = "selected" if (thought_ids or thought_paths) else "all"
+    preview["selected_thought_ids"] = [str(item) for item in thought_ids]
     preview["selected_thought_paths"] = [str(path) for path in thought_paths]
+    preview["skipped_selected_thought_ids"] = skipped_selected_ids
+    preview["skipped_selected_thought_paths"] = skipped_selected_paths
+    preview["source_thought_ids"] = [_thought_item_fingerprint(item) for item in thoughts]
+    preview["source_thought_paths"] = [item.get("path") for item in thoughts]
     return {"ok": True, "digest_preview": preview, "thought_count": len(thoughts)}
 
 
@@ -2209,17 +2246,31 @@ def assistant_digest_preview():
 def assistant_approve_digest():
     payload = request.get_json(silent=True) or {}
     preview = payload.get("digest_preview") or {}
-    source_paths = [str(path) for path in preview.get("source_thoughts", [])]
-    selected_paths = [str(path) for path in preview.get("selected_thought_paths", [])]
-    target_paths = selected_paths or source_paths
-    thoughts = _thoughts_by_paths(target_paths)
+    source_paths = [str(path) for path in preview.get("source_thought_paths") or preview.get("source_thoughts") or [] if str(path).strip()]
+    source_ids = [str(item) for item in preview.get("source_thought_ids") or [] if str(item).strip()]
+    selected_paths = [str(path) for path in preview.get("selected_thought_paths", []) if str(path).strip()]
+    selected_ids = [str(item) for item in preview.get("selected_thought_ids", []) if str(item).strip()]
+    if not source_paths:
+        return {"ok": False, "error": "Approval payload is missing source paths. Re-run digest before approving."}, 400
+    if selected_ids:
+        thoughts = _thoughts_by_ids(selected_ids)
+    elif selected_paths:
+        thoughts = _thoughts_by_paths(selected_paths)
+    else:
+        thoughts = _thoughts_by_paths(source_paths)
     if not thoughts:
         return {"ok": False, "error": "No active thoughts available for approval."}, 400
-
+    valid_ids = {_thought_item_fingerprint(item) for item in thoughts}
+    valid_paths = {item["path"] for item in thoughts}
+    skipped_ids = [item_id for item_id in selected_ids if item_id not in valid_ids]
+    skipped_paths = [path for path in selected_paths if path not in valid_paths]
     by_path = {item["path"]: item for item in thoughts}
+    source_items = [item for item in thoughts if item["path"] in source_paths]
+    if not source_items:
+        source_items = thoughts
     moved_paths: list[str] = []
     created_handoffs: list[str] = []
-    created_sprints: list[str] = []
+    created_sprints: list[dict[str, str]] = []
     for proposal in preview.get("sprint_groups", []):
         proposal_paths = [str(path) for path in proposal.get("source_thoughts", [])]
         active_thoughts = [by_path[path] for path in proposal_paths if path in by_path]
@@ -2231,19 +2282,23 @@ def assistant_approve_digest():
         sprint_record = {
             **proposal,
             "status": "approved",
+            "sprint_id": proposal.get("sprint_id") or f"sp-{_sprint_id_prefix()}",
             "created_at": datetime.now(timezone.utc).isoformat(),
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "proposed_work": proposal.get("proposed_work") or [],
-            "selected_thought_paths": target_paths,
+            "selected_thought_paths": source_paths,
+            "selected_thought_ids": source_ids or selected_ids or [_thought_item_fingerprint(item) for item in source_items],
+            "source_thought_paths": source_paths,
+            "source_thought_ids": source_ids or [_thought_item_fingerprint(item) for item in source_items],
             "digested_source_thoughts": [],
         }
         handoff_path = _write_sprint_handoff_file(sprint_record)
         sprint_record["handoff_path"] = str(handoff_path.relative_to(WORKLOG_ROOT))
-        sprint_path = None
         moved_for_group: list[str] = []
         sprint_record["digested_source_thoughts"] = moved_for_group
         sprint_path = _write_sprint_record(sprint_record, "approved")
-        created_sprints.append(str(sprint_path.relative_to(WORKLOG_ROOT)))
+        sprint_record["path"] = str(sprint_path.relative_to(WORKLOG_ROOT))
+        created_sprints.append({"path": sprint_record["path"], "sprint_id": str(sprint_record["sprint_id"]), "sprint_code": str(sprint_record["sprint_code"])})
         created_handoffs.append(str(handoff_path.relative_to(WORKLOG_ROOT)))
         for thought in active_thoughts:
             source_file = WORKLOG_ROOT / thought["path"]
@@ -2288,6 +2343,11 @@ def assistant_approve_digest():
         "created_sprints": created_sprints,
         "created_handoffs": created_handoffs,
         "moved_thoughts": moved_paths,
+        "skipped_selected_thought_ids": skipped_ids,
+        "skipped_selected_thought_paths": skipped_paths,
+        "sprint_queue_url": url_for("sprints"),
+        "sprint_detail_urls": [url_for("sprint_detail", sprint_id=item["sprint_id"]) for item in created_sprints],
+        "handoff_urls": [url_for("view_file", relative_path=path) for path in created_handoffs],
         "assistant_reply": "Sprint handoffs approved. Handoff markdown files were created and raw ideas were moved to digested.",
     }
 

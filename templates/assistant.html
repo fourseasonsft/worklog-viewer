@@ -81,7 +81,7 @@
               {% for item in conversation %}
                 <tr data-thought-path="{{ item.path }}">
                   <td>
-                    <input class="form-check-input idea-select" type="checkbox" value="{{ item.path }}" data-thought-path="{{ item.path }}">
+                    <input class="form-check-input idea-select" type="checkbox" value="{{ item.thought_id }}" data-thought-id="{{ item.thought_id }}" data-thought-path="{{ item.path }}">
                   </td>
                   <td class="text-nowrap">{{ item.created_at or item.mtime_display or 'Unknown' }}</td>
                   <td>
@@ -214,6 +214,10 @@
       </div>
     </div>
   </section>
+
+  <section class="mb-4">
+    <div id="digest-result" class="alert d-none" role="alert"></div>
+  </section>
 </div>
 
 <script>
@@ -236,6 +240,7 @@
   const ideaInventoryBody = document.getElementById('idea-inventory-body');
   const selectedCountBadge = document.getElementById('selected-count-badge');
   const selectionStatus = document.getElementById('selection-status');
+  const digestResult = document.getElementById('digest-result');
   let digestPreview = {{ digest_preview | tojson if digest_preview else 'null' }};
   let lastDigestMode = 'all';
 
@@ -243,8 +248,20 @@
     return Array.from(document.querySelectorAll('.idea-select:checked'));
   }
 
-  function selectedPaths() {
+  function selectedIds() {
     return selectedCheckboxes().map((checkbox) => checkbox.value);
+  }
+
+  function clearDigestResult() {
+    if (!digestResult) return;
+    digestResult.className = 'alert d-none';
+    digestResult.innerHTML = '';
+  }
+
+  function showDigestResult(message, variant = 'success', links = []) {
+    if (!digestResult) return;
+    digestResult.className = `alert alert-${variant}`;
+    digestResult.innerHTML = `${message}${links.length ? `<div class="mt-2 d-flex flex-wrap gap-2">${links.join('')}</div>` : ''}`;
   }
 
   function syncSelectionUI() {
@@ -261,6 +278,7 @@
 
   function renderPreview(data) {
     digestPreview = data;
+    clearDigestResult();
     previewEmpty.classList.add('d-none');
     previewBody.classList.remove('d-none');
     if (digestAppTable) {
@@ -334,8 +352,8 @@
   }
 
   async function requestDigest(selectedOnly) {
-    const thought_paths = selectedOnly ? selectedPaths() : [];
-    if (selectedOnly && thought_paths.length === 0) {
+    const thought_ids = selectedOnly ? selectedIds() : [];
+    if (selectedOnly && thought_ids.length === 0) {
       status.textContent = 'Select at least one raw idea before digesting.';
       return;
     }
@@ -343,7 +361,7 @@
     const res = await fetch('{{ url_for("assistant_digest_preview") }}', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({thought_paths, selected_only: selectedOnly}),
+      body: JSON.stringify({thought_ids, selected_only: selectedOnly}),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -402,7 +420,22 @@
       status.textContent = data.error || 'Approval failed.';
       return;
     }
+    const links = [];
+    if (data.sprint_queue_url) {
+      links.push(`<a class="btn btn-sm btn-outline-primary" href="${data.sprint_queue_url}">View Sprint Queue</a>`);
+    }
+    if (Array.isArray(data.sprint_detail_urls) && data.sprint_detail_urls[0]) {
+      links.push(`<a class="btn btn-sm btn-outline-primary" href="${data.sprint_detail_urls[0]}">View Sprint Detail</a>`);
+    }
+    if (Array.isArray(data.handoff_urls) && data.handoff_urls[0]) {
+      links.push(`<a class="btn btn-sm btn-outline-primary" href="${data.handoff_urls[0]}">View Handoff</a>`);
+    }
+    showDigestResult(data.assistant_reply || 'Approved.', 'success', links);
     status.textContent = data.assistant_reply || 'Approved.';
+    if (data.skipped_selected_thought_ids?.length || data.skipped_selected_thought_paths?.length) {
+      const skipped = [...(data.skipped_selected_thought_ids || []), ...(data.skipped_selected_thought_paths || [])];
+      status.textContent += ` Skipped: ${skipped.join(', ')}.`;
+    }
     digestPreview = null;
     previewBody.classList.add('d-none');
     previewEmpty.classList.remove('d-none');
@@ -411,6 +444,7 @@
 
   async function cancelDigest() {
     digestPreview = null;
+    clearDigestResult();
     previewBody.classList.add('d-none');
     previewEmpty.classList.remove('d-none');
     status.textContent = 'Sprint groups cleared. Ideas kept raw.';
@@ -456,7 +490,7 @@
     digestSelectedButton?.addEventListener('click', () => requestDigest(true));
     digestAllButton?.addEventListener('click', () => requestDigest(false));
     archiveSelectedButton?.addEventListener('click', async () => {
-      const thought_paths = selectedPaths();
+      const thought_paths = Array.from(document.querySelectorAll('.idea-select:checked')).map((checkbox) => checkbox.dataset.thoughtPath || checkbox.closest('tr')?.dataset.thoughtPath || checkbox.value);
       if (!thought_paths.length) {
         status.textContent = 'Select at least one raw idea before archiving.';
         return;

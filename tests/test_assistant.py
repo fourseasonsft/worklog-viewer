@@ -151,13 +151,14 @@ class WorklogAssistantTests(unittest.TestCase):
         preview = self._client().post(
             "/api/assistant/digest-preview",
             json={
-                "thought_paths": ["04-inbox/thought-box/2026-06-20-100000-ims.md"],
+                "thought_ids": [viewer_app._thought_box_items(digested_only=False)[0]["thought_id"]],
                 "selected_only": True,
             },
         ).get_json()["digest_preview"]
         self.assertEqual(preview["selection_mode"], "selected")
-        self.assertEqual(preview["selected_thought_paths"], ["04-inbox/thought-box/2026-06-20-100000-ims.md"])
-        self.assertEqual(preview["source_thoughts"], ["04-inbox/thought-box/2026-06-20-100000-ims.md"])
+        selected_item = next(item for item in viewer_app._thought_box_items(digested_only=False) if item["path"].endswith("100001-worklog.md"))
+        self.assertEqual(preview["selected_thought_ids"], [selected_item["thought_id"]])
+        self.assertEqual(preview["source_thoughts"], [selected_item["path"]])
         self.assertEqual(len(preview["active_items"]), 1)
 
     def test_digest_all_includes_all_active_ideas(self) -> None:
@@ -214,15 +215,18 @@ class WorklogAssistantTests(unittest.TestCase):
         body = response.get_json()
         self.assertTrue(body["created_handoffs"])
         self.assertTrue(body["moved_thoughts"])
+        self.assertTrue(body["created_sprints"])
         handoff_files = list((self.root / "05-sprint-handoffs").glob("*.md"))
         self.assertTrue(handoff_files)
-        handoff_text = handoff_files[0].read_text(encoding="utf-8")
+        handoff_text = next(path for path in handoff_files if "# Sprint Handoff:" in path.read_text(encoding="utf-8")).read_text(encoding="utf-8")
         self.assertIn("# Sprint Handoff:", handoff_text)
         self.assertIn("## Sprint Code", handoff_text)
         self.assertIn("## Completion Requirement", handoff_text)
         self.assertIn("## Codex/ChatGPT Starting Prompt", handoff_text)
         self.assertIn("Sprint Code:", handoff_text)
         self.assertIn("## Source Ideas", handoff_text)
+        sprint_handoff_files = [path for path in handoff_files if "# Sprint Handoff:" in path.read_text(encoding="utf-8")]
+        self.assertTrue(sprint_handoff_files)
         self.assertTrue(list((self.root / "04-inbox/thought-box/digested").glob("*.md")))
 
     def test_approve_digest_only_moves_selected_thoughts(self) -> None:
@@ -237,7 +241,7 @@ class WorklogAssistantTests(unittest.TestCase):
         preview = self._client().post(
             "/api/assistant/digest-preview",
             json={
-                "thought_paths": ["04-inbox/thought-box/2026-06-20-100000-ims.md"],
+                "thought_ids": [viewer_app._thought_box_items(digested_only=False)[0]["thought_id"]],
                 "selected_only": True,
             },
         ).get_json()["digest_preview"]
@@ -247,15 +251,78 @@ class WorklogAssistantTests(unittest.TestCase):
         active = sorted(p.name for p in (self.root / "04-inbox/thought-box").glob("*.md"))
         self.assertEqual(len(digested), 1)
         self.assertEqual(len(active), 1)
-        self.assertIn("2026-06-20-100001-worklog.md", active[0])
+        self.assertIn("2026-06-20-100000-ims.md", active[0])
 
     def test_empty_selection_returns_clear_error(self) -> None:
         response = self._client().post(
             "/api/assistant/digest-preview",
-            json={"thought_paths": [], "selected_only": True},
+            json={"thought_ids": [], "selected_only": True},
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("Select at least one raw idea", response.get_json()["error"])
+
+    def test_invalid_selection_returns_clear_error(self) -> None:
+        response = self._client().post(
+            "/api/assistant/digest-preview",
+            json={"thought_ids": ["missing-id"], "selected_only": True},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("no longer match active raw ideas", response.get_json()["error"])
+
+    def test_approval_without_source_paths_fails_safely(self) -> None:
+        response = self._client().post(
+            "/api/assistant/approve-digest",
+            json={"digest_preview": {"sprint_groups": []}},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("missing source paths", response.get_json()["error"])
+
+    def test_selected_digest_flow_creates_sprint_record_and_preserves_others(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-ims.md",
+            "# IMS\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs break bulk handling.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs break bulk handling.\n",
+        )
+        self._write_thought(
+            "2026-06-20-100001-worklog.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:01Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Worklog needs queue selection.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Worklog needs queue selection.\n",
+        )
+        self._write_thought(
+            "2026-06-20-100002-dispatch.md",
+            "# Dispatch\n\n- created_at: 2026-06-20T10:00:02Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Dispatch needs a load board cleanup.\n- ai_inferred_app: Dispatch\n- ai_inferred_type: feature\n- ai_summary: Dispatch needs a load board cleanup.\n",
+        )
+        selected = next(item for item in viewer_app._thought_box_items(digested_only=False) if item["path"].endswith("100000-ims.md"))
+        preview = self._client().post(
+            "/api/assistant/digest-preview",
+            json={"thought_ids": [selected["thought_id"]], "selected_only": True},
+        ).get_json()["digest_preview"]
+        self.assertEqual(preview["source_thoughts"], [selected["path"]])
+        response = self._client().post("/api/assistant/approve-digest", json={"digest_preview": preview})
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertTrue(body["created_sprints"])
+        self.assertTrue(body["created_handoffs"])
+        self.assertTrue(body["sprint_queue_url"].endswith("/sprints"))
+        self.assertTrue(body["sprint_detail_urls"])
+        self.assertTrue(body["handoff_urls"])
+        queue_files = list((self.root / "06-sprints/approved").glob("*.md"))
+        self.assertEqual(len(queue_files), 1)
+        handoff_files = list((self.root / "05-sprint-handoffs").glob("*.md"))
+        self.assertGreaterEqual(len(handoff_files), 1)
+        digested_files = sorted(p.name for p in (self.root / "04-inbox/thought-box/digested").glob("*.md"))
+        active_files = sorted(p.name for p in (self.root / "04-inbox/thought-box").glob("*.md"))
+        self.assertEqual(len(digested_files), 1)
+        self.assertEqual(len(active_files), 2)
+        self.assertIn("2026-06-20-100001-worklog.md", active_files)
+        self.assertIn("2026-06-20-100002-dispatch.md", active_files)
+        self.assertTrue(any("Sprint Code" in path.read_text(encoding="utf-8") for path in queue_files))
+        queue_html = self._client().get("/sprints").get_data(as_text=True)
+        self.assertIn("approved", queue_html.lower())
+        detail_html = self._client().get(body["sprint_detail_urls"][0]).get_data(as_text=True)
+        self.assertIn("Sprint Code", detail_html)
+        self.assertIn("Source Ideas", detail_html)
+        self.assertIn("Proposed Work", detail_html)
+        self.assertIn("Completion Requirement", detail_html)
+        self.assertIn("Codex Prompt", detail_html)
 
     def test_handoff_includes_source_ideas_and_prompt(self) -> None:
         self._write_thought(
@@ -265,7 +332,7 @@ class WorklogAssistantTests(unittest.TestCase):
         preview = self._client().post("/api/assistant/digest-preview", json={}).get_json()["digest_preview"]
         response = self._client().post("/api/assistant/approve-digest", json={"digest_preview": preview})
         self.assertEqual(response.status_code, 200)
-        handoff_file = next((self.root / "05-sprint-handoffs").glob("*.md"))
+        handoff_file = next(path for path in (self.root / "05-sprint-handoffs").glob("*.md") if "# Sprint Handoff:" in path.read_text(encoding="utf-8"))
         text = handoff_file.read_text(encoding="utf-8")
         self.assertIn("Source Ideas", text)
         self.assertIn("Codex/ChatGPT Starting Prompt", text)

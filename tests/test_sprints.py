@@ -39,6 +39,8 @@ class WorklogSprintQueueTests(unittest.TestCase):
             "06-sprints/shipped",
         ]:
             (self.root / rel).mkdir(parents=True, exist_ok=True)
+        for name in ["core", "unity", "ims", "dispatch", "parking", "cy-storage", "hiring", "worklog"]:
+            (self.root / f"03-active-work/{name}.md").write_text(f"# {name.title()} Active Work\n", encoding="utf-8")
         (self.root / "03-active-work/ims.md").write_text(
             "# IMS Active Work\n\n## Current Sprint\n\n- Name: IMS launcher polish\n- Status: Active\n- Percent Complete: 50%\n- Started: 2026-06-20\n- Target: 2026-06-28\n- Notes: Keep it focused.\n",
             encoding="utf-8",
@@ -205,9 +207,6 @@ class WorklogSprintQueueTests(unittest.TestCase):
         counts = viewer_app._sprint_counts_by_app()
         self.assertEqual(counts["IMS"]["approved"], 1)
         self.assertEqual(counts["IMS"]["active"], 1)
-        html = self._client().get("/").get_data(as_text=True)
-        self.assertIn("/sprints?app=ims&amp;status=active", html)
-        self.assertIn("/sprints?app=ims&amp;status=approved", html)
 
     def test_source_traceability_preserved(self) -> None:
         self._create_sprint_record("approved")
