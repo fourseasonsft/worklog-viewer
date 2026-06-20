@@ -11,6 +11,12 @@
       <div class="d-flex flex-wrap gap-2">
         <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('sprints') }}">Back to Sprint Queue</a>
         <a class="btn btn-outline-primary btn-sm" href="{{ url_for('dashboard') }}">Dashboard</a>
+        {% if record.status_key == 'approved' %}
+          <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+            <input type="hidden" name="action" value="regenerate_handoff">
+            <button class="btn btn-primary btn-sm" type="submit">Regenerate Handoff</button>
+          </form>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -76,7 +82,7 @@
             <tbody>
               {% for thought in record.source_thought_paths or record.digested_source_thoughts or record.source_thoughts %}
                 <tr>
-                  <td>{{ record.source_thoughts[loop.index0] if record.source_thoughts and loop.index0 < record.source_thoughts|length else thought.split('/')[-1].replace('.md', '').replace('-', ' ').title() }}</td>
+                  <td>{{ record.source_idea_summaries[loop.index0] if record.source_idea_summaries and loop.index0 < record.source_idea_summaries|length else (record.source_thoughts[loop.index0] if record.source_thoughts and loop.index0 < record.source_thoughts|length else thought.split('/')[-1].replace('.md', '').replace('-', ' ').title()) }}</td>
                   <td><a href="{{ url_for('view_file', relative_path=thought) }}">Open source thought</a></td>
                 </tr>
               {% else %}
@@ -118,6 +124,13 @@
               <button class="btn btn-outline-secondary" type="button" data-copy-target="handoff-copy">Copy Handoff</button>
             </div>
           </div>
+        </div>
+
+        <div class="mt-4 d-flex flex-wrap gap-2">
+          <a class="btn btn-outline-secondary" href="{{ url_for('sprints') }}">View Sprint Queue</a>
+          {% if record.handoff_path %}
+            <a class="btn btn-outline-primary" href="{{ url_for('view_file', relative_path=record.handoff_path) }}">View Handoff</a>
+          {% endif %}
         </div>
 
       </div>

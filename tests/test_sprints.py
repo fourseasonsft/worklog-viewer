@@ -156,6 +156,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("Generated Handoff", html)
         self.assertIn("Copy Prompt", html)
         self.assertIn("Copy Handoff", html)
+        self.assertIn("Regenerate Handoff", html)
 
     def test_transitions_work(self) -> None:
         self._create_sprint_record("approved")
@@ -200,6 +201,86 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertTrue(list((self.root / "06-sprints/approved").glob("*.md")))
         self.assertTrue(list((self.root / "05-sprint-handoffs").glob("*.md")))
         self.assertTrue(list((self.root / "04-inbox/thought-box/digested").glob("*.md")))
+        record = viewer_app._sprint_records()[0]
+        self.assertTrue(record["source_thought_paths"])
+        self.assertTrue(record["source_idea_summaries"])
+        self.assertIn("Completion Requirement", record["handoff_markdown"])
+        self.assertIn("Source Ideas", record["handoff_markdown"])
+
+    def test_regenerate_handoff_repairs_source_sections(self) -> None:
+        record_path = self._create_sprint_record("approved")
+        record = viewer_app._sprint_record_by_id("sp-20260620120000-approved")
+        self.assertIsNotNone(record)
+        record_path.write_text(
+            "\n".join(
+                [
+                    "# Sprint Queue Record: IMS Sprint",
+                    "",
+                    "- sprint_id: sp-20260620120000-approved",
+                    "- sprint_code: IMS-SPRINT-20260620-001",
+                    "- app_product: IMS",
+                    "- status: approved",
+                    "- scope: Small",
+                    "- idea_count: 2",
+                    "- created_at: 2026-06-20T12:00:00Z",
+                    "- updated_at: 2026-06-20T12:30:00Z",
+                    "- handoff_path: 05-sprint-handoffs/2026-06-20-120000-ims-sprint.md",
+                    "- purpose: Simplify queue workflows.",
+                    "- recommended_first_step: Review the source ideas.",
+                    "",
+                    "## Source Ideas",
+                    "- Inbox and Sprint Queue filters should auto-apply when changed.",
+                    "- Simplify the Inbox navigation and reduce visible category clutter.",
+                    "",
+                    "## Source Thought Paths",
+                    "- 04-inbox/thought-box/ims-ui.md",
+                    "- 04-inbox/thought-box/worklog-queue.md",
+                    "",
+                    "## Source Idea Summaries",
+                    "- Inbox and Sprint Queue filters should auto-apply when changed.",
+                    "- Simplify the Inbox navigation and reduce visible category clutter.",
+                    "",
+                    "## Digested Source Ideas",
+                    "- 04-inbox/thought-box/digested/ims-ui.md",
+                    "- 04-inbox/thought-box/digested/worklog-queue.md",
+                    "",
+                    "## Proposed Work",
+                    "- Improve the IMS queue surface.",
+                    "- Tighten Worklog queue filtering.",
+                    "",
+                    "## Handoff Markdown",
+                    "05-sprint-handoffs/2026-06-20-120000-ims-sprint.md",
+                    "",
+                    "## Codex/ChatGPT Starting Prompt",
+                    "Start a focused implementation conversation.",
+                    "",
+                    "## Completion Requirement",
+                    "When this sprint is complete, update Worklog using Sprint Code IMS-SPRINT-20260620-001.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (self.root / "05-sprint-handoffs/2026-06-20-120000-ims-sprint.md").write_text(
+            "# Sprint Handoff: IMS Sprint\n\n## Source Ideas\n- Old placeholder\n\n## Proposed Work\n- Old placeholder\n",
+            encoding="utf-8",
+        )
+        response = self._client().post("/sprints/sp-20260620120000-approved/action", data={"action": "regenerate_handoff"}, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        handoff_text = (self.root / "05-sprint-handoffs/2026-06-20-120000-ims-sprint.md").read_text(encoding="utf-8")
+        self.assertIn("Inbox and Sprint Queue filters should auto-apply when changed.", handoff_text)
+        self.assertIn("Simplify the Inbox navigation and reduce visible category clutter.", handoff_text)
+        self.assertIn("Completion Requirement", handoff_text)
+        self.assertIn("Codex/ChatGPT Starting Prompt", handoff_text)
+
+    def test_regenerate_all_handoffs_action_runs(self) -> None:
+        self._create_sprint_record("approved", title="IMS Sprint A")
+        self._create_sprint_record("approved", title="IMS Sprint B")
+        response = self._client().post("/sprints/regenerate-handoffs", data={"confirm": "yes"}, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertTrue(body["ok"])
+        self.assertGreaterEqual(len(body["regenerated"]), 2)
 
     def test_dashboard_sprint_counts_work(self) -> None:
         self._create_sprint_record("approved")

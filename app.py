@@ -854,6 +854,8 @@ def _proposal_to_sprint_record(proposal: dict[str, object]) -> tuple[dict[str, o
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "proposed_work": proposal.get("proposed_work") or [],
         "source_idea_summaries": proposal_source_summaries,
+        "purpose": proposal.get("purpose") or "",
+        "recommended_first_step": proposal.get("recommended_first_step") or "",
         "selected_thought_paths": proposal_source_paths,
         "selected_thought_ids": proposal_source_ids,
         "source_thought_paths": proposal_source_paths,
@@ -953,12 +955,17 @@ def _write_sprint_record(group: dict[str, object], status: str = "approved") -> 
             f"- created_at: {group.get('created_at') or datetime.now(timezone.utc).isoformat()}",
             f"- updated_at: {datetime.now(timezone.utc).isoformat()}",
             f"- handoff_path: {handoff_path}",
+            f"- purpose: {group.get('purpose') or ''}",
+            f"- recommended_first_step: {group.get('recommended_first_step') or ''}",
             "",
             "## Source Ideas",
             *([f"- {item}" for item in source_idea_summaries] or [f"- {item}" for item in source_thoughts] or ["- None"]),
             "",
             "## Source Thought Paths",
             *([f"- {item}" for item in source_thought_paths] or ["- None"]),
+            "",
+            "## Source Idea Summaries",
+            *([f"- {item}" for item in source_idea_summaries] or ["- None"]),
             "",
             "## Digested Source Ideas",
             *([f"- {item}" for item in digested_thoughts] or ["- None"]),
@@ -997,6 +1004,7 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
         title = path.stem.split("-", 1)[1].replace("-", " ").title() if "-" in path.stem else path.stem.title()
     source_thoughts = []
     source_thought_paths = []
+    source_idea_summaries = []
     digested_source_thoughts = []
     proposed_work = []
     current_section = None
@@ -1008,6 +1016,8 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
             source_thoughts.append(line[2:].strip())
         elif current_section == "source thought paths" and line.startswith("- "):
             source_thought_paths.append(line[2:].strip())
+        elif current_section == "source idea summaries" and line.startswith("- "):
+            source_idea_summaries.append(line[2:].strip())
         elif current_section == "digested source ideas" and line.startswith("- "):
             digested_source_thoughts.append(line[2:].strip())
         elif current_section == "proposed work" and line.startswith("- "):
@@ -1032,6 +1042,7 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
         "path": str(path.relative_to(WORKLOG_ROOT)),
         "source_thoughts": source_thoughts,
         "source_thought_paths": source_thought_paths,
+        "source_idea_summaries": source_idea_summaries,
         "digested_source_thoughts": digested_source_thoughts,
         "proposed_work": proposed_work,
         "handoff_path": handoff_path,
@@ -1039,7 +1050,95 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
         "raw_html": _render_markdown(text),
         "starting_prompt": meta.get("starting_prompt") or _extract_section_text(text, "Codex/ChatGPT Starting Prompt"),
         "completion_requirement": meta.get("completion requirement") or _extract_section_text(text, "Completion Requirement"),
+        "purpose": meta.get("purpose") or _extract_section_text(text, "Purpose"),
+        "recommended_first_step": meta.get("recommended_first_step") or _extract_section_text(text, "Recommended First Step"),
     }
+
+
+def _resolve_sprint_source_thoughts(record: dict[str, object]) -> list[dict[str, str]]:
+    thoughts = _thoughts_by_ids([str(item) for item in record.get("source_thought_ids", []) if str(item).strip()])
+    if thoughts:
+        return thoughts
+    thoughts = _thoughts_by_paths([str(item) for item in record.get("source_thought_paths", []) if str(item).strip()])
+    if thoughts:
+        return thoughts
+    wanted = {str(item).strip().lower() for item in record.get("source_idea_summaries", []) if str(item).strip()}
+    if not wanted:
+        wanted = {str(item).strip().lower() for item in record.get("source_thoughts", []) if str(item).strip()}
+    matched: list[dict[str, str]] = []
+    if wanted:
+        for item in _thought_box_items(digested_only=False):
+            normalized = str(item.get("normalized_summary") or item.get("display_snippet") or item.get("raw_text_full") or item.get("title") or "").strip().lower()
+            if normalized and normalized in wanted:
+                matched.append(item)
+    if matched:
+        return matched
+    fallback_texts = [str(item).strip() for item in record.get("source_idea_summaries", []) if str(item).strip()]
+    if not fallback_texts:
+        fallback_texts = [str(item).strip() for item in record.get("source_thoughts", []) if str(item).strip()]
+    return [
+        {
+            "path": "",
+            "title": text,
+            "raw_text_full": text,
+            "normalized_summary": text,
+            "display_snippet": text,
+        }
+        for text in fallback_texts
+    ]
+
+
+def _regenerate_sprint_handoff_record(record: dict[str, object]) -> tuple[dict[str, object], Path, Path]:
+    fallback_texts = [str(item).strip() for item in record.get("source_idea_summaries", []) if str(item).strip()]
+    fallback_paths = [str(item).strip() for item in record.get("source_thought_paths", []) if str(item).strip()]
+    if fallback_texts:
+        thoughts = [
+            {
+                "path": fallback_paths[index] if index < len(fallback_paths) else "",
+                "title": text,
+                "raw_text_full": text,
+                "normalized_summary": text,
+                "display_snippet": text,
+            }
+            for index, text in enumerate(fallback_texts)
+        ]
+    else:
+        thoughts = _resolve_sprint_source_thoughts(record)
+        if not thoughts:
+            fallback_texts = [str(item).strip() for item in record.get("source_thoughts", []) if str(item).strip()]
+            thoughts = [
+                {
+                    "path": fallback_paths[index] if index < len(fallback_paths) else "",
+                    "title": text,
+                    "raw_text_full": text,
+                    "normalized_summary": text,
+                    "display_snippet": text,
+                }
+                for index, text in enumerate(fallback_texts)
+            ]
+    sprint_group = {
+        **record,
+        "thoughts": thoughts,
+        "source_thoughts": [thought["path"] for thought in thoughts],
+        "source_thought_paths": [thought["path"] for thought in thoughts],
+        "source_thought_ids": [_thought_item_fingerprint(thought) for thought in thoughts],
+        "source_idea_summaries": [thought.get("normalized_summary") or thought.get("raw_text_full") or thought.get("display_snippet") or thought.get("title") for thought in thoughts],
+        "proposed_work": record.get("proposed_work") or [thought.get("normalized_summary") or thought.get("raw_text_full") or thought.get("display_snippet") or thought.get("title") for thought in thoughts],
+        "purpose": record.get("purpose") or (f"Turn {record.get('app_product') or 'Worklog'} ideas into a focused sprint-sized implementation conversation."),
+        "recommended_first_step": record.get("recommended_first_step") or (thoughts[0].get("normalized_summary") if thoughts else "Review the source ideas and outline the smallest implementation slice."),
+    }
+    handoff_markdown = _build_handoff_markdown(str(sprint_group.get("app_product") or "Worklog"), str(sprint_group.get("title") or record.get("title") or "Sprint"), thoughts, sprint_group)
+    handoff_path_value = str(record.get("handoff_path") or "").strip()
+    handoff_path = WORKLOG_ROOT / handoff_path_value if handoff_path_value else Path()
+    if not handoff_path_value or not handoff_path.exists():
+        handoff_path = _sprint_handoffs_dir() / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H%M%S')}-{_slugify_title(str(record.get('title') or record.get('sprint_group_name') or 'sprint'))}.md"
+    handoff_path.parent.mkdir(parents=True, exist_ok=True)
+    handoff_path.write_text(handoff_markdown, encoding="utf-8")
+    sprint_group["handoff_path"] = str(handoff_path.relative_to(WORKLOG_ROOT))
+    sprint_group["handoff_markdown"] = handoff_markdown
+    sprint_path = _write_sprint_record(sprint_group, str(record.get("status_key") or "approved"))
+    sprint_group["path"] = str(sprint_path.relative_to(WORKLOG_ROOT))
+    return sprint_group, handoff_path, sprint_path
 
 
 def _write_sprint_handoff_file(group: dict[str, object]) -> Path:
@@ -2361,6 +2460,9 @@ def sprint_action(sprint_id: str):
         new_path = _update_sprint_record(record_path, "completed")
     elif action == "ship":
         new_path = _update_sprint_record(record_path, "shipped")
+    elif action == "regenerate_handoff":
+        regenerated, handoff_path, sprint_path = _regenerate_sprint_handoff_record(record)
+        new_path = sprint_path
     else:
         abort(400)
     return redirect(url_for("sprint_detail", sprint_id=sprint_id))
@@ -2392,12 +2494,39 @@ def sprint_action_by_code(sprint_code: str):
         record_path = _update_sprint_record(record_path, "completed")
     elif action == "ship":
         record_path = _update_sprint_record(record_path, "shipped")
+    elif action == "regenerate_handoff":
+        regenerated, handoff_path, sprint_path = _regenerate_sprint_handoff_record(record)
+        record_path = sprint_path
     else:
         abort(400)
     notes = (request.form.get("completion_notes") or "").strip()
     if notes:
         _append_sprint_completion_notes(record_path, notes)
     return redirect(url_for("sprint_detail", sprint_id=record["id"]))
+
+
+@app.route("/sprints/regenerate-handoffs", methods=["POST"])
+@_require_worklog_session
+def regenerate_all_sprint_handoffs():
+    confirmation = (request.form.get("confirm") or "").strip().lower()
+    if confirmation != "yes":
+        return {"ok": False, "error": "Confirmation required to regenerate all sprint handoffs."}, 400
+    regenerated = []
+    for record in _sprint_records():
+        if record.get("status_key") != "approved":
+            continue
+        rebuilt, handoff_path, sprint_path = _regenerate_sprint_handoff_record(record)
+        regenerated.append({
+            "sprint_id": rebuilt["id"],
+            "sprint_code": rebuilt["sprint_code"],
+            "handoff_path": str(handoff_path.relative_to(WORKLOG_ROOT)),
+            "sprint_path": str(sprint_path.relative_to(WORKLOG_ROOT)),
+        })
+    return {
+        "ok": True,
+        "regenerated": regenerated,
+        "sprint_queue_url": url_for("sprints"),
+    }
 
 
 @app.route("/api/assistant/thoughts")
