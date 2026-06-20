@@ -151,7 +151,7 @@ class WorklogAssistantTests(unittest.TestCase):
         preview = self._client().post(
             "/api/assistant/digest-preview",
             json={
-                "thought_ids": [viewer_app._thought_box_items(digested_only=False)[0]["thought_id"]],
+                "selected_idea_ids": [viewer_app._thought_box_items(digested_only=False)[0]["thought_id"]],
                 "selected_only": True,
             },
         ).get_json()["digest_preview"]
@@ -256,7 +256,7 @@ class WorklogAssistantTests(unittest.TestCase):
     def test_empty_selection_returns_clear_error(self) -> None:
         response = self._client().post(
             "/api/assistant/digest-preview",
-            json={"thought_ids": [], "selected_only": True},
+            json={"selected_idea_ids": [], "selected_only": True},
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("Select at least one raw idea", response.get_json()["error"])
@@ -264,7 +264,7 @@ class WorklogAssistantTests(unittest.TestCase):
     def test_invalid_selection_returns_clear_error(self) -> None:
         response = self._client().post(
             "/api/assistant/digest-preview",
-            json={"thought_ids": ["missing-id"], "selected_only": True},
+            json={"selected_idea_ids": ["missing-id"], "selected_only": True},
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("no longer match active raw ideas", response.get_json()["error"])
@@ -293,7 +293,7 @@ class WorklogAssistantTests(unittest.TestCase):
         selected = next(item for item in viewer_app._thought_box_items(digested_only=False) if item["path"].endswith("100000-ims.md"))
         preview = self._client().post(
             "/api/assistant/digest-preview",
-            json={"thought_ids": [selected["thought_id"]], "selected_only": True},
+            json={"selected_idea_ids": [selected["thought_id"]], "selected_only": True},
         ).get_json()["digest_preview"]
         self.assertEqual(preview["source_thoughts"], [selected["path"]])
         response = self._client().post("/api/assistant/approve-digest", json={"digest_preview": preview})

@@ -2212,7 +2212,7 @@ def assistant_message():
 @_require_worklog_session
 def assistant_digest_preview():
     payload = request.get_json(silent=True) or {}
-    thought_ids = [str(item) for item in (payload.get("thought_ids") or []) if str(item).strip()]
+    thought_ids = [str(item) for item in (payload.get("selected_idea_ids") or payload.get("thought_ids") or []) if str(item).strip()]
     thought_paths = [str(item) for item in (payload.get("thought_paths") or []) if str(item).strip()]
     selected_only = bool(payload.get("selected_only"))
     if thought_ids:
@@ -2233,6 +2233,7 @@ def assistant_digest_preview():
     preview = _digest_groups_from_items(thoughts)
     preview["selection_mode"] = "selected" if (thought_ids or thought_paths) else "all"
     preview["selected_thought_ids"] = [str(item) for item in thought_ids]
+    preview["selected_idea_ids"] = [str(item) for item in thought_ids]
     preview["selected_thought_paths"] = [str(path) for path in thought_paths]
     preview["skipped_selected_thought_ids"] = skipped_selected_ids
     preview["skipped_selected_thought_paths"] = skipped_selected_paths
@@ -2249,7 +2250,7 @@ def assistant_approve_digest():
     source_paths = [str(path) for path in preview.get("source_thought_paths") or preview.get("source_thoughts") or [] if str(path).strip()]
     source_ids = [str(item) for item in preview.get("source_thought_ids") or [] if str(item).strip()]
     selected_paths = [str(path) for path in preview.get("selected_thought_paths", []) if str(path).strip()]
-    selected_ids = [str(item) for item in preview.get("selected_thought_ids", []) if str(item).strip()]
+    selected_ids = [str(item) for item in (preview.get("selected_idea_ids") or preview.get("selected_thought_ids") or []) if str(item).strip()]
     if not source_paths:
         return {"ok": False, "error": "Approval payload is missing source paths. Re-run digest before approving."}, 400
     if selected_ids:

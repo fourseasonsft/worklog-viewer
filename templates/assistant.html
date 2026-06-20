@@ -352,8 +352,10 @@
   }
 
   async function requestDigest(selectedOnly) {
-    const thought_ids = selectedOnly ? selectedIds() : [];
-    if (selectedOnly && thought_ids.length === 0) {
+    const selectedIdeaIds = selectedOnly ? selectedIds() : [];
+    clearDigestResult();
+    if (selectedOnly && selectedIdeaIds.length === 0) {
+      showDigestResult('Select at least one raw idea before digesting.', 'warning');
       status.textContent = 'Select at least one raw idea before digesting.';
       return;
     }
@@ -361,14 +363,23 @@
     const res = await fetch('{{ url_for("assistant_digest_preview") }}', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({thought_ids, selected_only: selectedOnly}),
+      body: JSON.stringify({selected_idea_ids: selectedIdeaIds, selected_only: selectedOnly}),
     });
-    const data = await res.json();
+    let data = null;
+    try {
+      data = await res.json();
+    } catch (error) {
+      showDigestResult(`Digest preview failed: ${error.message}`, 'danger');
+      status.textContent = 'Digest preview failed.';
+      return;
+    }
     if (!res.ok) {
+      showDigestResult(data.error || 'Digest failed.', 'danger');
       status.textContent = data.error || 'Digest failed.';
       return;
     }
     renderPreview(data.digest_preview);
+    showDigestResult(selectedOnly ? 'Proposed Update Review is ready for selected ideas.' : 'Proposed Update Review is ready.', 'success');
     status.textContent = selectedOnly ? 'Sprint groups ready for selected ideas.' : 'Sprint groups ready.';
   }
 
@@ -415,8 +426,16 @@
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({digest_preview: digestPreview}),
     });
-    const data = await res.json();
+    let data = null;
+    try {
+      data = await res.json();
+    } catch (error) {
+      showDigestResult(`Approval failed: ${error.message}`, 'danger');
+      status.textContent = 'Approval failed.';
+      return;
+    }
     if (!res.ok) {
+      showDigestResult(data.error || 'Approval failed.', 'danger');
       status.textContent = data.error || 'Approval failed.';
       return;
     }
@@ -458,6 +477,7 @@
     });
     const data = await res.json();
     if (!res.ok) {
+      showDigestResult(data.error || 'Archive failed.', 'danger');
       status.textContent = data.error || 'Archive failed.';
       return;
     }
