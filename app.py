@@ -71,6 +71,17 @@ APP_FILTERS = {
     "worklog": "Worklog",
 }
 APP_ORDER = ["Core", "Unity", "IMS", "CY Storage", "Dispatch", "Parking", "Hiring", "Worklog", "Other"]
+SPRINT_CODE_PREFIXES = {
+    "core": "CORE",
+    "unity": "UNITY",
+    "ims": "IMS",
+    "cy-storage": "CY",
+    "dispatch": "DISPATCH",
+    "parking": "PARKING",
+    "hiring": "HIRING",
+    "worklog": "WL",
+    "other": "OTHER",
+}
 INBOX_TYPES = {
     "all",
     "new",
@@ -702,9 +713,63 @@ def _sprint_id_prefix() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 
 
+def _sprint_code_prefix(app_product: str) -> str:
+    return SPRINT_CODE_PREFIXES.get(_normalize_app_filter(app_product), "OTHER")
+
+
+def _sprint_code_date() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d")
+
+
+def _existing_sprint_codes() -> set[str]:
+    codes = set()
+    for record in _sprint_records():
+        code = str(record.get("sprint_code") or "").strip().upper()
+        if code:
+            codes.add(code)
+    return codes
+
+
+def _generate_sprint_code(app_product: str, reserved_codes: set[str] | None = None) -> str:
+    prefix = _sprint_code_prefix(app_product)
+    date_stamp = _sprint_code_date()
+    existing = _existing_sprint_codes()
+    if reserved_codes:
+        existing = existing.union({code.upper() for code in reserved_codes})
+    for sequence in range(1, 1000):
+        code = f"{prefix}-SPRINT-{date_stamp}-{sequence:03d}"
+        if code not in existing:
+            return code
+    raise ValueError("Unable to generate a unique sprint code.")
+
+
+def _sprint_code_from_record(record: dict[str, object]) -> str:
+    code = str(record.get("sprint_code") or record.get("sprint_id") or "").strip().upper()
+    if code.startswith("SP-"):
+        code = code[3:]
+    return code
+
+
+def _update_sprint_record_text(path: Path, updates: dict[str, str]) -> None:
+    text = path.read_text(encoding="utf-8")
+    for key, value in updates.items():
+        pattern = rf"^- {re.escape(key)}: .*?$"
+        replacement = f"- {key}: {value}"
+        if re.search(pattern, text, flags=re.M):
+            text = re.sub(pattern, replacement, text, flags=re.M)
+        else:
+            insert_at = text.find("\n\n")
+            if insert_at == -1:
+                text += f"\n- {key}: {value}\n"
+            else:
+                text = text[: insert_at + 2] + f"- {key}: {value}\n" + text[insert_at + 2 :]
+    path.write_text(text, encoding="utf-8")
+
+
 def _write_sprint_record(group: dict[str, object], status: str = "approved") -> Path:
     _ensure_sprint_dirs()
     sprint_id = str(group.get("sprint_id") or f"sp-{_sprint_id_prefix()}")
+    sprint_code = str(group.get("sprint_code") or _generate_sprint_code(str(group.get("app_product") or "Other")))
     title = str(group.get("sprint_group_name") or "Sprint")
     path = _sprint_record_path(status, sprint_id, title)
     source_thoughts = [str(item) for item in group.get("source_thoughts", [])]
@@ -716,6 +781,7 @@ def _write_sprint_record(group: dict[str, object], status: str = "approved") -> 
             f"# Sprint Queue Record: {title}",
             "",
             f"- sprint_id: {sprint_id}",
+            f"- sprint_code: {sprint_code}",
             f"- app_product: {app_product}",
             f"- status: {status}",
             f"- scope: {group.get('scope') or 'Small'}",
@@ -738,6 +804,9 @@ def _write_sprint_record(group: dict[str, object], status: str = "approved") -> 
             "",
             "## Codex/ChatGPT Starting Prompt",
             str(group.get("starting_prompt") or ""),
+            "",
+            "## Completion Requirement",
+            f"When this sprint is complete, update Worklog using Sprint Code {sprint_code}.",
             "",
         ]
     )
@@ -774,6 +843,7 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
             handoff_markdown = handoff_file.read_text(encoding="utf-8")
     return {
         "id": sprint_id,
+        "sprint_code": meta.get("sprint_code") or sprint_id.upper(),
         "title": title,
         "app_product": app_product,
         "status": status.title(),
@@ -790,6 +860,7 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
         "handoff_markdown": handoff_markdown,
         "raw_html": _render_markdown(text),
         "starting_prompt": meta.get("starting_prompt") or _extract_section_text(text, "Codex/ChatGPT Starting Prompt"),
+        "completion_requirement": meta.get("completion requirement") or _extract_section_text(text, "Completion Requirement"),
     }
 
 
@@ -1018,9 +1089,27 @@ def _update_sprint_record(record_path: Path, status: str) -> Path:
     return new_path
 
 
+def _append_sprint_completion_notes(record_path: Path, notes: str) -> Path:
+    text = record_path.read_text(encoding="utf-8")
+    if "## Completion Notes" not in text:
+        text += "\n## Completion Notes\n"
+    text += f"\n{notes.strip()}\n"
+    text = re.sub(r"^- updated_at: .*?$", f"- updated_at: {datetime.now(timezone.utc).isoformat()}", text, flags=re.M)
+    record_path.write_text(text, encoding="utf-8")
+    return record_path
+
+
 def _sprint_record_by_id(sprint_id: str) -> dict[str, object] | None:
     for record in _sprint_records():
         if record.get("id") == sprint_id:
+            return record
+    return None
+
+
+def _sprint_record_by_code(sprint_code: str) -> dict[str, object] | None:
+    sprint_code = sprint_code.strip().upper()
+    for record in _sprint_records():
+        if str(record.get("sprint_code") or "").strip().upper() == sprint_code:
             return record
     return None
 
@@ -1289,11 +1378,13 @@ def _sprint_group_priority(thoughts: list[dict[str, str]]) -> str:
     return "Low"
 
 
-def _build_codex_prompt(app_name: str, sprint_name: str, thoughts: list[dict[str, str]]) -> str:
+def _build_codex_prompt(app_name: str, sprint_name: str, thoughts: list[dict[str, str]], sprint_code: str = "") -> str:
     source_titles = ", ".join(thought.get("title") or thought.get("path") or "Thought" for thought in thoughts[:5])
     return (
         f"Start a focused implementation conversation for {app_name}. "
         f"Work on the sprint group '{sprint_name}'. "
+        f"Sprint Code: {sprint_code or 'TBD'}. "
+        "Completion Requirement: At the end of this sprint, update the matching Sprint Queue record by Sprint Code. Do not leave the sprint status stale. "
         f"Source ideas: {source_titles}. "
         "Keep the scope small, preserve existing behavior, and return a concise plan before editing files."
     )
@@ -1301,6 +1392,7 @@ def _build_codex_prompt(app_name: str, sprint_name: str, thoughts: list[dict[str
 
 def _build_handoff_markdown(app_name: str, sprint_name: str, thoughts: list[dict[str, str]], group: dict[str, object]) -> str:
     purpose = group.get("purpose") or f"Turn {app_name} raw ideas into a focused sprint-sized implementation conversation."
+    sprint_code = str(group.get("sprint_code") or (thoughts[0].get("sprint_code") if thoughts else "") or "TBD").strip()
     proposed_work = []
     for thought in thoughts[:5]:
         text = thought.get("raw_text", "").strip().splitlines()[0][:140] if thought.get("raw_text") else thought.get("title") or "Thought"
@@ -1309,6 +1401,9 @@ def _build_handoff_markdown(app_name: str, sprint_name: str, thoughts: list[dict
     return "\n".join(
         [
             f"# Sprint Handoff: {sprint_name}",
+            "",
+            "## Sprint Code",
+            sprint_code,
             "",
             f"## App/Product",
             app_name,
@@ -1328,8 +1423,11 @@ def _build_handoff_markdown(app_name: str, sprint_name: str, thoughts: list[dict
             "## Recommended First Step",
             str(group.get("recommended_first_step") or "Open the source ideas, confirm the smallest common implementation slice, and outline the first chat response."),
             "",
+            "## Completion Requirement",
+            f"When this sprint is complete, update Worklog using Sprint Code {sprint_code}.",
+            "",
             "## Codex/ChatGPT Starting Prompt",
-            str(group.get("starting_prompt") or _build_codex_prompt(app_name, sprint_name, thoughts)),
+            str(group.get("starting_prompt") or _build_codex_prompt(app_name, sprint_name, thoughts, sprint_code)),
             "",
         ]
     )
@@ -1361,6 +1459,7 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
 
     app_groups = []
     sprint_groups = []
+    reserved_codes = set(_existing_sprint_codes())
     for app_name in APP_ORDER:
         thoughts = grouped.get(app_name, [])
         if not thoughts:
@@ -1391,6 +1490,8 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
 
         for cluster_name, cluster_thoughts in by_cluster.items():
             sprint_name = _sprint_group_name(app_name, cluster_thoughts)
+            sprint_code = _generate_sprint_code(app_name, reserved_codes)
+            reserved_codes.add(sprint_code)
             proposed_type = _sprint_group_type(cluster_thoughts)
             feasibility = _sprint_group_feasibility(cluster_thoughts)
             priority = _sprint_group_priority(cluster_thoughts)
@@ -1401,6 +1502,7 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
             )
             group = {
                 "app_product": app_name,
+                "sprint_code": sprint_code,
                 "sprint_group_name": sprint_name,
                 "ideas_included": len(cluster_thoughts),
                 "proposed_type": proposed_type,
@@ -1415,17 +1517,21 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
                 ],
                 "scope": _sprint_group_scope(cluster_thoughts),
                 "purpose": f"Turn {app_name} ideas into a focused {cluster_name} sprint.",
-                "starting_prompt": _build_codex_prompt(app_name, sprint_name, cluster_thoughts),
+                "starting_prompt": "",
                 "thoughts": cluster_thoughts,
             }
+            group["starting_prompt"] = _build_codex_prompt(app_name, sprint_name, cluster_thoughts, sprint_code)
             sprint_groups.append(group)
 
     if not sprint_groups:
         thought = active_items[0]
         sprint_name = _sprint_group_name(thought["ai_inferred_app"], [thought])
+        sprint_code = _generate_sprint_code(thought["ai_inferred_app"], reserved_codes)
+        reserved_codes.add(sprint_code)
         sprint_groups.append(
             {
                 "app_product": thought["ai_inferred_app"],
+                "sprint_code": sprint_code,
                 "sprint_group_name": sprint_name,
                 "ideas_included": 1,
                 "proposed_type": _sprint_group_type([thought]),
@@ -1436,7 +1542,7 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
                 "proposed_work": [thought.get("raw_text", "").strip().splitlines()[0][:160]] if thought.get("raw_text") else [],
                 "scope": "Small",
                 "purpose": f"Turn {thought['ai_inferred_app']} ideas into a focused sprint.",
-                "starting_prompt": _build_codex_prompt(thought["ai_inferred_app"], sprint_name, [thought]),
+                "starting_prompt": _build_codex_prompt(thought["ai_inferred_app"], sprint_name, [thought], sprint_code),
                 "thoughts": [thought],
             }
         )
@@ -2007,6 +2113,40 @@ def sprint_action(sprint_id: str):
     else:
         abort(400)
     return redirect(url_for("sprint_detail", sprint_id=sprint_id))
+
+
+@app.route("/sprints/code/<sprint_code>", methods=["GET"])
+@_require_worklog_session
+def sprint_detail_by_code(sprint_code: str):
+    record = _sprint_record_by_code(sprint_code)
+    if not record:
+        abort(404)
+    return redirect(url_for("sprint_detail", sprint_id=record["id"]))
+
+
+@app.route("/sprints/code/<sprint_code>/action", methods=["POST"])
+@_require_worklog_session
+def sprint_action_by_code(sprint_code: str):
+    record = _sprint_record_by_code(sprint_code)
+    if not record:
+        abort(404)
+    confirmation = (request.form.get("confirm") or "").strip().lower()
+    if confirmation != "yes":
+        return {"ok": False, "error": "Confirmation required to update sprint status by code."}, 400
+    action = (request.form.get("action") or "").strip().lower()
+    record_path = WORKLOG_ROOT / str(record["path"])
+    if action == "start":
+        record_path = _update_sprint_record(record_path, "active")
+    elif action == "complete":
+        record_path = _update_sprint_record(record_path, "completed")
+    elif action == "ship":
+        record_path = _update_sprint_record(record_path, "shipped")
+    else:
+        abort(400)
+    notes = (request.form.get("completion_notes") or "").strip()
+    if notes:
+        _append_sprint_completion_notes(record_path, notes)
+    return redirect(url_for("sprint_detail", sprint_id=record["id"]))
 
 
 @app.route("/api/assistant/thoughts")

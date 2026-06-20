@@ -50,6 +50,7 @@
       <table class="table inbox-table align-middle mb-0">
         <thead>
           <tr>
+            <th>Sprint Code</th>
             <th>Sprint Name</th>
             <th>App/Product</th>
             <th>Status</th>
@@ -64,6 +65,7 @@
           {% if records %}
             {% for record in records %}
               <tr>
+                <td class="text-nowrap fw-semibold">{{ record.sprint_code }}</td>
                 <td class="fw-semibold">{{ record.title }}</td>
                 <td><span class="badge text-bg-light border">{{ record.app_product }}</span></td>
                 <td><span class="badge {% if record.status_key == 'active' %}text-bg-primary{% elif record.status_key == 'approved' %}text-bg-warning{% elif record.status_key == 'completed' %}text-bg-secondary{% elif record.status_key == 'shipped' %}text-bg-success{% else %}text-bg-light border{% endif %}">{{ record.status }}</span></td>
@@ -95,7 +97,7 @@
               </tr>
             {% endfor %}
           {% else %}
-            <tr><td colspan="8" class="p-4 text-secondary">No sprint records match the selected filters.</td></tr>
+            <tr><td colspan="9" class="p-4 text-secondary">No sprint records match the selected filters.</td></tr>
           {% endif %}
         </tbody>
       </table>

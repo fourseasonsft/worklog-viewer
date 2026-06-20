@@ -70,6 +70,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
         return client
 
     def _create_sprint_record(self, status: str, app_product: str = "IMS", title: str = "IMS Sprint") -> Path:
+        sprint_code = f"{viewer_app._sprint_code_prefix(app_product)}-SPRINT-20260620-001"
         path = self.root / f"06-sprints/{status}/sp-20260620120000-{status}-{title.lower().replace(' ', '-')}.md"
         path.write_text(
             "\n".join(
@@ -77,6 +78,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
                     f"# Sprint Queue Record: {title}",
                     "",
                     f"- sprint_id: sp-20260620120000-{status}",
+                    f"- sprint_code: {sprint_code}",
                     f"- app_product: {app_product}",
                     f"- status: {status}",
                     "- scope: Small",
@@ -97,7 +99,10 @@ class WorklogSprintQueueTests(unittest.TestCase):
                     "05-sprint-handoffs/2026-06-20-120000-ims-sprint.md",
                     "",
                     "## Codex/ChatGPT Starting Prompt",
-                    "Start a focused implementation conversation.",
+                    f"Sprint Code: {sprint_code}\nCompletion Requirement: At the end of this sprint, update the matching Sprint Queue record by Sprint Code. Do not leave the sprint status stale.\nStart a focused implementation conversation.",
+                    "",
+                    "## Completion Requirement",
+                    f"When this sprint is complete, update Worklog using Sprint Code {sprint_code}.",
                     "",
                 ]
             ),
@@ -114,9 +119,16 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self._create_sprint_record("approved")
         html = self._client().get("/sprints").get_data(as_text=True)
         self.assertIn("Sprint Queue", html)
+        self.assertIn("Sprint Code", html)
         self.assertIn("IMS Sprint", html)
         self.assertIn("Start Sprint", html)
         self.assertIn("onchange=\"this.form.requestSubmit()\"", html)
+
+    def test_generated_sprint_code_is_unique(self) -> None:
+        self._create_sprint_record("approved", app_product="IMS", title="IMS Sprint 1")
+        code = viewer_app._generate_sprint_code("IMS")
+        self.assertNotEqual(code, "IMS-SPRINT-20260620-001")
+        self.assertRegex(code, r"^IMS-SPRINT-\d{8}-\d{3}$")
 
     def test_filters_work(self) -> None:
         self._create_sprint_record("approved")
@@ -138,6 +150,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self._create_sprint_record("approved")
         html = self._client().get("/sprints/sp-20260620120000-approved").get_data(as_text=True)
         self.assertIn("Sprint Queue Record", html)
+        self.assertIn("Sprint Code", html)
         self.assertIn("Generated Handoff", html)
         self.assertIn("Copy Prompt", html)
         self.assertIn("Copy Handoff", html)
@@ -158,6 +171,22 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         shipped_path = self.root / "06-sprints/shipped/sp-20260620120000-approved-ims-sprint.md"
         self.assertTrue(shipped_path.exists())
+
+    def test_completion_update_by_code_works(self) -> None:
+        self._create_sprint_record("approved")
+        client = self._client()
+        response = client.post(
+            "/sprints/code/IMS-SPRINT-20260620-001/action",
+            data={"confirm": "yes", "action": "complete", "completion_notes": "Validated in browser."},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        record = viewer_app._sprint_record_by_code("IMS-SPRINT-20260620-001")
+        self.assertIsNotNone(record)
+        self.assertEqual(record["status_key"], "completed")
+        text = (self.root / "06-sprints/completed/sp-20260620120000-approved-ims-sprint.md").read_text(encoding="utf-8")
+        self.assertIn("## Completion Notes", text)
+        self.assertIn("Validated in browser.", text)
 
     def test_approval_creates_sprint_record_and_handoff(self) -> None:
         preview = viewer_app._digest_preview(viewer_app._thought_box_items(digested_only=False))
@@ -186,6 +215,12 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIsNotNone(record)
         self.assertIn("04-inbox/thought-box/ims-ui.md", record["source_thoughts"])
         self.assertIn("Sprint Handoff: IMS Sprint", record["handoff_markdown"])
+
+    def test_lookup_by_code_works(self) -> None:
+        self._create_sprint_record("approved")
+        record = viewer_app._sprint_record_by_code("IMS-SPRINT-20260620-001")
+        self.assertIsNotNone(record)
+        self.assertEqual(record["sprint_code"], "IMS-SPRINT-20260620-001")
 
 
 if __name__ == "__main__":

@@ -187,6 +187,7 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertEqual(preview["app_groups"][0]["app_product"], "IMS")
         self.assertGreaterEqual(preview["app_groups"][0]["thought_count"], 2)
         self.assertTrue(any(group["app_product"] == "IMS" for group in preview["sprint_groups"]))
+        self.assertTrue(all(group.get("sprint_code") for group in preview["sprint_groups"]))
 
     def test_digest_output_renders_as_tables(self) -> None:
         self._write_thought(
@@ -217,7 +218,10 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertTrue(handoff_files)
         handoff_text = handoff_files[0].read_text(encoding="utf-8")
         self.assertIn("# Sprint Handoff:", handoff_text)
+        self.assertIn("## Sprint Code", handoff_text)
+        self.assertIn("## Completion Requirement", handoff_text)
         self.assertIn("## Codex/ChatGPT Starting Prompt", handoff_text)
+        self.assertIn("Sprint Code:", handoff_text)
         self.assertIn("## Source Ideas", handoff_text)
         self.assertTrue(list((self.root / "04-inbox/thought-box/digested").glob("*.md")))
 
@@ -265,6 +269,8 @@ class WorklogAssistantTests(unittest.TestCase):
         text = handoff_file.read_text(encoding="utf-8")
         self.assertIn("Source Ideas", text)
         self.assertIn("Codex/ChatGPT Starting Prompt", text)
+        self.assertIn("Completion Requirement", text)
+        self.assertIn("Sprint Code:", text)
 
     def test_no_thoughts_empty_state_works(self) -> None:
         html = self._client().get("/assistant").get_data(as_text=True)
