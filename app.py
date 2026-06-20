@@ -41,6 +41,15 @@ TOP_DASHBOARD_FILES = [
     {"title": "Where We Left Off", "path": "00-dashboard/where-we-left-off.md", "anchor": "where-we-left-off"},
 ]
 INBOX_FOLDERS = ["new", "bugs", "features", "support"]
+INTAKE_TYPE_BUCKETS = {
+    "bug": "bugs",
+    "feature": "features",
+    "support": "support",
+    "note": "new",
+    "blocker": "new",
+    "thought": "new",
+    "customer-request": "new",
+}
 
 
 app = Flask(__name__)
@@ -288,6 +297,30 @@ def _parse_inbox_item(path: Path) -> dict[str, object]:
     }
 
 
+def _parse_structured_inbox_item(path: Path) -> dict[str, str]:
+    data: dict[str, str] = {"path": str(path.relative_to(WORKLOG_ROOT))}
+    text = path.read_text(encoding="utf-8")
+    current_section = None
+    for line in text.splitlines():
+        if line.startswith("- "):
+            if ":" in line[2:]:
+                key, value = line[2:].split(":", 1)
+                data[key.strip().lower().replace(" ", "_")] = value.strip()
+        elif line.startswith("## "):
+            current_section = line[3:].strip().lower().replace(" ", "_")
+            data.setdefault(current_section, "")
+        elif current_section and line.strip():
+            data[current_section] = (data.get(current_section, "") + "\n" + line).strip()
+    data["title"] = data.get("title") or path.stem.replace("-", " ").title()
+    data["category"] = path.parent.name
+    data["summary"] = data.get("plain_english_summary") or data.get("summary") or data["title"]
+    data["next_action"] = data.get("suggested_next_action") or data.get("next_action") or ""
+    data["mtime_display"] = _format_file_timestamp(path)
+    data["mtime"] = _file_mtime(path)
+    data["why_it_matters"] = data.get("why_it_matters") or "Tracked intake item."
+    return data
+
+
 def _dashboard_counts() -> dict[str, int]:
     active_work_count = len(ACTIVE_WORK_FILES)
     blockers = _count_meaningful_bullets(_read_markdown("00-dashboard/blockers.md"))
@@ -312,6 +345,97 @@ def _recent_inbox_items(limit: int = 8) -> list[dict[str, object]]:
             items.append(_parse_inbox_item(path))
     items.sort(key=lambda item: (item["mtime"], item["path"]), reverse=True)
     return items[:limit]
+
+
+def _all_structured_inbox_items() -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    for folder in INBOX_FOLDERS:
+        for path in _relative_md_files(f"04-inbox/{folder}"):
+            items.append(_parse_structured_inbox_item(path))
+    items.sort(key=lambda item: (item.get("mtime", 0), item["path"]), reverse=True)
+    return items
+
+
+def _dashboard_intake_counts() -> dict[str, int]:
+    return {
+        "total": sum(_count_markdown_files(f"04-inbox/{folder}") for folder in INBOX_FOLDERS),
+        "urgent_high": sum(
+            1
+            for item in _all_structured_inbox_items()
+            if str(item.get("priority", "")).lower() in {"urgent", "high"}
+        ),
+        "blockers": sum(
+            1
+            for item in _all_structured_inbox_items()
+            if "block" in str(item.get("type", "")).lower() or "block" in str(item.get("status", "")).lower()
+        ),
+        "bugs": _count_markdown_files("04-inbox/bugs"),
+        "features": _count_markdown_files("04-inbox/features"),
+        "support": _count_markdown_files("04-inbox/support"),
+        "new": _count_markdown_files("04-inbox/new"),
+    }
+
+
+def _slugify_title(value: str) -> str:
+    value = value.lower()
+    value = re.sub(r"[^a-z0-9]+", "-", value)
+    return re.sub(r"-+", "-", value).strip("-") or "intake-item"
+
+
+def _create_inbox_item_from_form(form: dict[str, str]) -> Path:
+    title = (form.get("title") or "").strip() or "Untitled Worklog Item"
+    item_type = (form.get("type") or "note").strip().lower()
+    bucket = INTAKE_TYPE_BUCKETS.get(item_type, "new")
+    created_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    filename = f"{created_date}-{_slugify_title(title)}.md"
+    target = WORKLOG_ROOT / f"04-inbox/{bucket}/{filename}"
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    plain_summary = (form.get("plain_english_summary") or "").strip()
+    technical_notes = (form.get("technical_notes") or "").strip()
+    next_action = (form.get("next_action") or "").strip()
+    source = (form.get("source") or "").strip() or "Worklog Viewer"
+    requested_by = (form.get("requested_by") or "").strip() or "David"
+    app_project = (form.get("app_project") or "").strip() or "worklog"
+    priority = (form.get("priority") or "medium").strip().lower() or "medium"
+    why_it_matters = {
+        "bug": "This blocks reliable operation or creates user friction.",
+        "feature": "This adds capability that supports the Worklog workflow.",
+        "support": "This keeps the Worklog usable and reduces operational overhead.",
+    }.get(item_type, "This is useful intake that should be tracked until triaged.")
+
+    content = "\n".join(
+        [
+            f"# {title}",
+            "",
+            f"- Type: {item_type}",
+            f"- App/Project: {app_project}",
+            f"- Priority: {priority}",
+            f"- Status: new",
+            f"- Created Date: {created_date}",
+            f"- Source: {source}",
+            f"- Requested By: {requested_by}",
+            "",
+            "## Plain English Summary",
+            plain_summary or "TBD",
+            "",
+            "## Why It Matters",
+            why_it_matters,
+            "",
+            "## Technical Notes",
+            technical_notes or "TBD",
+            "",
+            "## Suggested Next Action",
+            next_action or "TBD",
+            "",
+        ]
+    )
+    target.write_text(content, encoding="utf-8")
+    return target
+
+
+def _intake_plain_mode_enabled() -> bool:
+    return request.args.get("plain", "").strip() == "1"
 
 
 def _dashboard_documents() -> list[dict[str, object]]:
@@ -546,6 +670,9 @@ def dashboard():
     active_work = [_summarize_active_work_file(item["path"], item["title"]) for item in ACTIVE_WORK_FILES]
     counts = _dashboard_counts()
     inbox_items = _recent_inbox_items()
+    intake_counts = _dashboard_intake_counts()
+    intake_items = _all_structured_inbox_items()[:8]
+    plain_mode = _intake_plain_mode_enabled()
     summary_cards = [
         {"label": "Open Bugs", "count": counts["open_bugs"], "href": url_for("inbox_bugs"), "hint": "Current bug items"},
         {"label": "Open Features", "count": counts["open_features"], "href": url_for("inbox_features"), "hint": "Requested enhancements"},
@@ -565,11 +692,15 @@ def dashboard():
         {"label": "Inbox", "href": url_for("inbox")},
         {"label": "Runbooks", "href": url_for("runbooks")},
         {"label": "Active Work", "href": url_for("active_work")},
+        {"label": "Intake", "href": url_for("intake")},
     ]
 
     return render_template(
         "dashboard.html",
         counts=counts,
+        intake_counts=intake_counts,
+        intake_items=intake_items,
+        plain_mode=plain_mode,
         quick_links=quick_links,
         summary_cards=summary_cards,
         portfolio_status=portfolio_status,
@@ -688,6 +819,24 @@ def inbox_support():
 @_require_worklog_session
 def inbox_closed():
     return render_template("listing.html", title="Inbox / Closed", items=_category_files("04-inbox/closed"))
+
+
+@app.route("/intake", methods=["GET", "POST"])
+@_require_worklog_session
+def intake():
+    if request.method == "POST":
+        created_path = _create_inbox_item_from_form(request.form)
+        return redirect(url_for("view_file", relative_path=str(created_path.relative_to(WORKLOG_ROOT))))
+
+    intake_counts = _dashboard_intake_counts()
+    intake_items = _all_structured_inbox_items()[:8]
+    plain_mode = _intake_plain_mode_enabled()
+    return render_template(
+        "intake.html",
+        intake_counts=intake_counts,
+        intake_items=intake_items,
+        plain_mode=plain_mode,
+    )
 
 
 @app.route("/view/<path:relative_path>")
