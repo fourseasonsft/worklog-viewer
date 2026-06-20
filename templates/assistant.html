@@ -1,30 +1,36 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="assistant-shell">
-  <section class="hero-card card card-shadow border-0 mb-4">
-    <div class="card-body p-4 p-xl-5 d-flex flex-column flex-lg-row justify-content-between gap-3">
-      <div>
+  <section class="card surface-card card-shadow border-0 mb-4">
+    <div class="card-body p-4 p-xl-5 d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-lg-start">
+      <div class="hero-copy">
         <div class="eyebrow text-uppercase text-secondary small fw-semibold mb-2">Idea Inventory</div>
-        <h1 class="h2 mb-2">Capture ideas, group them, approve updates, ship improvements</h1>
-        <p class="text-secondary mb-0">Worklog is IMS for David’s brain. Capture ideas. Group them into Idea Orders. Approve Updates. Ship improvements.</p>
-        <div class="text-secondary small mt-2">Raw ideas stay visible until David approves a Proposed Update.</div>
+        <h1 class="h2 mb-2">Capture ideas, digest them, and approve routed updates</h1>
+        <p class="text-secondary mb-0">Worklog is IMS for David's brain. Raw ideas stay in inventory until the Proposed Update Review is approved.</p>
       </div>
-      <div class="text-lg-end">
-        <div class="badge {% if openai_enabled %}text-bg-success{% else %}text-bg-warning{% endif %} mb-2">
+      <div class="d-flex flex-column gap-2 align-items-lg-end">
+        <div class="badge {% if openai_enabled %}text-bg-success{% else %}text-bg-warning{% endif %} align-self-start align-self-lg-end">
           {% if openai_enabled %}OpenAI ready{% else %}OpenAI not configured{% endif %}
         </div>
         <div class="d-flex flex-wrap gap-2 justify-content-lg-end">
-          <a class="btn btn-outline-primary btn-sm" href="{{ url_for('dashboard') }}">Dashboard</a>
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('dashboard') }}">Dashboard</a>
+          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('intake') }}">Structured Intake</a>
           <button class="btn btn-primary btn-sm" type="button" id="proposed-update-button">Proposed Update Review</button>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="card card-shadow border-0 mb-4">
+  <section class="card surface-card card-shadow border-0 mb-4">
     <div class="card-body p-4 p-xl-5">
       <form id="assistant-form" class="assistant-form">
-        <div class="text-secondary small fw-semibold text-uppercase mb-2">Capture idea</div>
+        <div class="d-flex justify-content-between align-items-end gap-3 mb-3">
+          <div>
+            <div class="text-uppercase text-secondary small fw-semibold mb-2">Capture</div>
+            <h2 class="h4 mb-1">One clear capture input</h2>
+            <div class="text-secondary">Use this for fast raw ideas before they become structured work items.</div>
+          </div>
+        </div>
         <textarea class="form-control assistant-input mb-3" rows="5" name="message" placeholder="Need to fix intake copy for IMS and simplify the update flow"></textarea>
         <div class="d-flex flex-wrap gap-2 align-items-center">
           <button class="btn btn-primary btn-lg" type="submit">Save idea</button>
@@ -34,70 +40,82 @@
     </div>
   </section>
 
-  <section class="card card-shadow border-0 mb-4">
-    <div class="card-body p-4 p-xl-5">
-      <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-end mb-3">
-        <div>
-          <div class="text-secondary small fw-semibold text-uppercase mb-2">Idea Inventory</div>
-          <h2 class="h3 mb-1">Raw ideas waiting in the inventory</h2>
-          <div class="text-secondary">These are the raw pallets David has not approved for routing yet.</div>
-        </div>
-        <div class="text-secondary small">{{ idea_inventory_count }} active raw idea{{ '' if idea_inventory_count == 1 else 's' }}</div>
-      </div>
-      <div class="table-responsive">
-        <table class="table align-middle">
-          <thead>
-            <tr>
-              <th>Created</th>
-              <th>Idea</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody id="idea-inventory-body">
-            {% if conversation %}
-              {% for item in conversation %}
-                <tr data-thought-path="{{ item.path }}">
-                  <td class="text-nowrap">{{ item.created_at or item.mtime_display or 'Unknown' }}</td>
-                  <td>
-                    <div class="fw-semibold">{{ item.title }}</div>
-                    <div class="text-secondary small">{{ item.raw_text[:180] if item.raw_text else 'No raw text recorded.' }}</div>
-                  </td>
-                  <td>
-                    <span class="badge text-bg-warning">Idea Inventory</span>
-                    {% if item.ai_inferred_app %}<span class="badge text-bg-light border ms-1">{{ item.ai_inferred_app }}</span>{% endif %}
-                  </td>
-                  <td>
-                    <div class="d-flex flex-wrap gap-2">
-                      <a class="btn btn-outline-primary btn-sm" href="{{ url_for('view_file', relative_path=item.path) }}">View</a>
-                      <button class="btn btn-outline-secondary btn-sm archive-button" type="button" data-thought-path="{{ item.path }}">Archive</button>
-                    </div>
-                  </td>
-                </tr>
-              {% endfor %}
-            {% else %}
-              <tr><td colspan="4" class="text-secondary">No active raw ideas yet.</td></tr>
-            {% endif %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
   <section class="row g-4">
     <div class="col-12 col-xl-7">
-      <div class="card card-shadow border-0 h-100">
+      <div class="card surface-card card-shadow border-0 h-100">
         <div class="card-body p-4 p-xl-5">
-          <div class="text-secondary small fw-semibold text-uppercase mb-3">Idea Orders</div>
-          <div id="digest-preview-empty" class="{% if digest_preview %}d-none{% endif %} text-secondary">Request a Proposed Update Review after capturing ideas.</div>
+          <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-end mb-3">
+            <div>
+              <div class="text-uppercase text-secondary small fw-semibold mb-2">Idea Inventory</div>
+              <h2 class="h3 mb-1">Raw ideas waiting in the inventory</h2>
+              <div class="text-secondary">Keep these calm and readable until David approves a Proposed Update.</div>
+            </div>
+            <div class="text-secondary small">{{ idea_inventory_count }} active raw idea{{ '' if idea_inventory_count == 1 else 's' }}</div>
+          </div>
+          <div class="table-responsive">
+            <table class="table align-middle">
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>Idea</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="idea-inventory-body">
+                {% if conversation %}
+                  {% for item in conversation %}
+                    <tr data-thought-path="{{ item.path }}">
+                      <td class="text-nowrap">{{ item.created_at or item.mtime_display or 'Unknown' }}</td>
+                      <td>
+                        <div class="fw-semibold">{{ item.title }}</div>
+                        <div class="text-secondary small">{{ item.raw_text[:180] if item.raw_text else 'No raw text recorded.' }}</div>
+                      </td>
+                      <td>
+                        <span class="badge text-bg-warning">Idea Inventory</span>
+                        {% if item.ai_inferred_app %}<span class="badge text-bg-light border ms-1">{{ item.ai_inferred_app }}</span>{% endif %}
+                      </td>
+                      <td>
+                        <div class="d-flex flex-wrap gap-2">
+                          <a class="btn btn-outline-primary btn-sm" href="{{ url_for('view_file', relative_path=item.path) }}">View</a>
+                          <button class="btn btn-outline-secondary btn-sm archive-button" type="button" data-thought-path="{{ item.path }}">Archive</button>
+                        </div>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr><td colspan="4" class="text-secondary">No active raw ideas yet.</td></tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-xl-5">
+      <div class="card surface-card card-shadow border-0 h-100">
+        <div class="card-body p-4 p-xl-5">
+          <div class="text-uppercase text-secondary small fw-semibold mb-2">Proposed Update Review</div>
+          <div id="digest-preview-empty" class="{% if digest_preview %}d-none{% endif %} text-secondary">
+            Request a Proposed Update Review after capturing ideas.
+          </div>
           <div id="digest-preview-body" class="{% if not digest_preview %}d-none{% endif %}">
             {% if digest_preview %}
-              <div class="mb-3"><strong>Idea Orders:</strong> <span id="digest-grouped">{{ digest_preview.grouped_by_app }}</span></div>
-              <div class="mb-3"><strong>Proposed Update Summary:</strong> <span id="digest-summary">{{ digest_preview.plain_summary }}</span></div>
-              <div class="mb-3"><strong>Recommended Codex prompt:</strong><pre class="assistant-pre" id="digest-codex">{{ digest_preview.recommended_codex_prompt }}</pre></div>
+              <div class="priority-card mb-3">
+                <div class="text-uppercase text-secondary small fw-semibold mb-1">Idea Orders</div>
+                <div id="digest-grouped">{{ digest_preview.grouped_by_app }}</div>
+              </div>
+              <div class="priority-card mb-3">
+                <div class="text-uppercase text-secondary small fw-semibold mb-1">Proposed Update Summary</div>
+                <div id="digest-summary">{{ digest_preview.plain_summary }}</div>
+              </div>
+              <div class="priority-card mb-3">
+                <div class="text-uppercase text-secondary small fw-semibold mb-1">Recommended Codex prompt</div>
+                <pre class="assistant-pre mb-0" id="digest-codex">{{ digest_preview.recommended_codex_prompt }}</pre>
+              </div>
               <div class="mb-3">
-                <strong>Proposed Updates:</strong>
-                <span class="text-secondary">Worklog routing suggestions for approval.</span>
+                <div class="text-uppercase text-secondary small fw-semibold mb-2">Proposed Updates</div>
                 <div id="proposed-item-list">
                   {% for item in digest_preview.proposed_items %}
                     <div class="proposal-card mt-3">
@@ -115,21 +133,21 @@
           </div>
           <div id="digest-actions" class="d-flex flex-wrap gap-2 {% if not digest_preview %}d-none{% endif %}">
             <button class="btn btn-primary" type="button" id="approve-digest-button">Approve Update</button>
-            <button class="btn btn-outline-secondary" type="button" id="cancel-digest-button">Keep Ideas Raw</button>
+            <button class="btn btn-outline-secondary" type="button" id="cancel-digest-button">Keep Ideas in Inventory</button>
           </div>
         </div>
       </div>
     </div>
 
-    <div class="col-12 col-xl-5">
-      <div class="card card-shadow border-0 h-100">
+    <div class="col-12">
+      <div class="card surface-card card-shadow border-0">
         <div class="card-body p-4 p-xl-5">
-          <div class="text-secondary small fw-semibold text-uppercase mb-3">Shipped Updates</div>
+          <div class="text-uppercase text-secondary small fw-semibold mb-2">Shipped Updates</div>
           <h2 class="h4 mb-2">Shipped / live updates</h2>
           <div class="text-secondary mb-3">Approved updates become shipped update records, separate from the Idea Inventory.</div>
           <div class="row g-3">
             {% for update in update_shipments %}
-              <div class="col-12">
+              <div class="col-12 col-lg-6">
                 <div class="proposal-card h-100">
                   <div class="fw-semibold">{{ update.title }}</div>
                   <div class="text-secondary small">{{ update.mtime_display }} · {{ update.path }}</div>
@@ -324,6 +342,7 @@
     event.preventDefault();
     sendMessage(input.value);
   });
+
   proposedUpdateButton.addEventListener('click', requestDigest);
   if (approveButton) approveButton.addEventListener('click', approveDigest);
   if (cancelButton) cancelButton.addEventListener('click', cancelDigest);

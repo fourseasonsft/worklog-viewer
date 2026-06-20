@@ -137,23 +137,35 @@ def _latest_daily_log() -> str | None:
 
 def _nav_items() -> list[dict[str, str]]:
     return [
-        {"label": "Dashboard", "endpoint": "dashboard"},
-        {"label": "Idea Inventory", "endpoint": "assistant"},
-        {"label": "Portfolio Status", "endpoint": "view_file", "args": {"relative_path": "00-dashboard/portfolio-status.md"}},
-        {"label": "Engineering Priorities", "endpoint": "view_file", "args": {"relative_path": "00-dashboard/engineering-priorities.md"}},
-        {"label": "Roadmap", "endpoint": "roadmap"},
-        {"label": "Active Work", "endpoint": "active_work"},
-        {"label": "Daily Logs", "endpoint": "daily_logs"},
-        {"label": "Runbooks", "endpoint": "runbooks"},
-        {"label": "Inbox", "endpoint": "inbox"},
-        {"label": "Inbox / New", "endpoint": "inbox_new"},
-        {"label": "Inbox / Bugs", "endpoint": "inbox_bugs"},
-        {"label": "Inbox / Features", "endpoint": "inbox_features"},
-        {"label": "Inbox / Support", "endpoint": "inbox_support"},
-        {"label": "Inbox / Closed", "endpoint": "inbox_closed"},
-        {"label": "Decisions", "endpoint": "category_view", "category": "04-decisions"},
-        {"label": "Release Notes", "endpoint": "category_view", "category": "05-release-notes"},
-        {"label": "Ideas", "endpoint": "category_view", "category": "06-ideas"},
+        {
+            "label": "Primary",
+            "items": [
+                {"label": "Dashboard", "endpoint": "dashboard"},
+                {"label": "Idea Inventory", "endpoint": "assistant"},
+                {"label": "Updates", "endpoint": "release_notes"},
+                {"label": "Inbox", "endpoint": "inbox"},
+                {"label": "Daily Log", "endpoint": "daily_logs"},
+            ],
+        },
+        {
+            "label": "More",
+            "items": [
+                {"label": "Structured Intake", "endpoint": "intake"},
+                {"label": "Portfolio Status", "endpoint": "view_file", "args": {"relative_path": "00-dashboard/portfolio-status.md"}},
+                {"label": "Engineering Priorities", "endpoint": "view_file", "args": {"relative_path": "00-dashboard/engineering-priorities.md"}},
+                {"label": "Roadmap", "endpoint": "roadmap"},
+                {"label": "Active Work", "endpoint": "active_work"},
+                {"label": "Runbooks", "endpoint": "runbooks"},
+                {"label": "Decisions", "endpoint": "decisions"},
+                {"label": "Release Notes", "endpoint": "release_notes"},
+                {"label": "Ideas", "endpoint": "ideas"},
+                {"label": "Inbox / New", "endpoint": "inbox_new"},
+                {"label": "Inbox / Bugs", "endpoint": "inbox_bugs"},
+                {"label": "Inbox / Features", "endpoint": "inbox_features"},
+                {"label": "Inbox / Support", "endpoint": "inbox_support"},
+                {"label": "Inbox / Closed", "endpoint": "inbox_closed"},
+            ],
+        },
     ]
 
 
@@ -1191,6 +1203,9 @@ def dashboard():
     current_focus = top_documents[2]
     next_actions = top_documents[3]
     where_we_left_off = top_documents[4]
+    current_focus_summary = _extract_first_value(_extract_section_text(_read_markdown("00-dashboard/current-focus.md"), "Current Focus"))
+    next_action_summary = _extract_first_value(_extract_section_text(_read_markdown("00-dashboard/next-actions.md"), "Next Actions"))
+    blocker_text = _extract_section_text(_read_markdown("00-dashboard/blockers.md"), "Blockers")
     latest_daily_log_path = _latest_daily_log() or "01-daily-logs/2026/06/2026-06-11.md"
     latest_daily_log = {
         "title": "Today’s Daily Log",
@@ -1203,6 +1218,7 @@ def dashboard():
     inbox_items = _recent_inbox_items()
     intake_counts = _dashboard_intake_counts()
     intake_items = _triage_items()
+    update_shipments = _assistant_update_shipments()
     plain_mode = _intake_plain_mode_enabled()
     focus = _focus_summary()
     today_focus = _today_focus_items()
@@ -1223,6 +1239,9 @@ def dashboard():
         "dashboard.html",
         counts=counts,
         focus=focus,
+        current_focus_summary=current_focus_summary,
+        next_action_summary=next_action_summary,
+        blocker_text=blocker_text,
         today_focus=today_focus,
         blockers=blockers,
         triage_counts=triage_counts,
@@ -1238,6 +1257,7 @@ def dashboard():
         latest_daily_log=latest_daily_log,
         active_work=active_work,
         inbox_items=inbox_items,
+        update_shipments=update_shipments,
     )
 
 
