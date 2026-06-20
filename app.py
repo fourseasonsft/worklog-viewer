@@ -58,6 +58,24 @@ INTAKE_TYPE_BUCKETS = {
     "thought": "new",
     "customer-request": "new",
 }
+APP_FILTERS = {
+    "core": "Core",
+    "unity": "Unity",
+    "ims": "IMS",
+    "cy-storage": "CY Storage",
+    "dispatch": "Dispatch",
+    "parking": "Parking",
+    "hiring": "Hiring",
+    "worklog": "Worklog",
+}
+INBOX_TYPES = {
+    "all",
+    "new",
+    "bugs",
+    "features",
+    "support",
+    "closed",
+}
 
 
 app = Flask(__name__)
@@ -277,6 +295,23 @@ def _normalize_percent(value: str | None) -> str:
     return candidate if re.fullmatch(r"\d{1,3}%?", candidate) else ""
 
 
+def _slugify_app_name(value: str) -> str:
+    value = value.lower().replace("&", " and ")
+    value = re.sub(r"[^a-z0-9]+", "-", value)
+    return re.sub(r"-+", "-", value).strip("-")
+
+
+def _normalize_app_filter(value: str | None) -> str:
+    if not value:
+        return "all"
+    slug = _slugify_app_name(value)
+    if slug in APP_FILTERS or slug == "other":
+        return slug
+    if value.strip().lower() in {"all", "all-apps", "all apps"}:
+        return "all"
+    return "other"
+
+
 def _parse_active_work_file(relative_path: str, title: str) -> dict[str, object]:
     source_path = WORKLOG_ROOT / relative_path
     text = source_path.read_text(encoding="utf-8")
@@ -360,6 +395,72 @@ def _parse_inbox_item(path: Path) -> dict[str, object]:
     }
 
 
+def _infer_inbox_app(path: Path, metadata: dict[str, str], text: str) -> str:
+    candidates = [
+        metadata.get("app/project"),
+        metadata.get("app_project"),
+        metadata.get("app"),
+        metadata.get("product"),
+        metadata.get("project"),
+    ]
+    for candidate in candidates:
+        if candidate:
+            slug = _normalize_app_filter(candidate)
+            if slug != "other" and slug != "all":
+                return slug
+
+    stem = path.stem.lower()
+    for slug in APP_FILTERS:
+        if slug in stem:
+            return slug
+
+    haystack = f"{path.as_posix().lower()} {text.lower()}"
+    for slug, label in APP_FILTERS.items():
+        if slug in haystack or label.lower() in haystack:
+            return slug
+    return "other"
+
+
+def _parse_inbox_queue_item(path: Path) -> dict[str, object]:
+    text = path.read_text(encoding="utf-8")
+    metadata = _parse_key_value_metadata(text)
+    structured = _parse_structured_inbox_item(path)
+    title = structured.get("title") or path.stem.replace("-", " ").title()
+    item_type = path.parent.name
+    status = metadata.get("status") or "Open"
+    priority = metadata.get("priority") or "medium"
+    source = metadata.get("source") or "Worklog Viewer"
+    app_slug = _infer_inbox_app(path, metadata, text)
+    app_label = APP_FILTERS.get(app_slug, metadata.get("app/project") or metadata.get("app") or "Unassigned")
+    created = metadata.get("created") or metadata.get("created date") or metadata.get("created_at") or ""
+    updated = metadata.get("updated") or metadata.get("updated_at") or metadata.get("last updated") or ""
+    created_updated = created or updated or _format_file_timestamp(path)
+    description = (
+        metadata.get("summary")
+        or metadata.get("description")
+        or metadata.get("notes")
+        or metadata.get("plain_english_summary")
+        or metadata.get("technical_notes")
+        or structured.get("summary")
+        or title
+    )
+    return {
+        "type": item_type,
+        "title": title,
+        "app_slug": app_slug,
+        "app_label": app_label if app_label else "Unassigned",
+        "priority": priority,
+        "status": status,
+        "created_updated": created_updated,
+        "source": source,
+        "path": str(path.relative_to(WORKLOG_ROOT)),
+        "category": path.parent.name,
+        "mtime": _file_mtime(path),
+        "mtime_display": _format_file_timestamp(path),
+        "summary": description,
+    }
+
+
 def _parse_structured_inbox_item(path: Path) -> dict[str, str]:
     data: dict[str, str] = {"path": str(path.relative_to(WORKLOG_ROOT))}
     text = path.read_text(encoding="utf-8")
@@ -401,6 +502,21 @@ def _dashboard_counts() -> dict[str, int]:
     }
 
 
+def _filter_inbox_queue_items(items: list[dict[str, object]], inbox_type: str, app_slug: str) -> list[dict[str, object]]:
+    inbox_type = inbox_type.lower()
+    app_slug = _normalize_app_filter(app_slug)
+    if inbox_type == "closed":
+        visible_types = {"closed"}
+    elif inbox_type in {"bugs", "features", "support", "new"}:
+        visible_types = {inbox_type}
+    else:
+        visible_types = {"new", "bugs", "features", "support"}
+    filtered = [item for item in items if item["type"] in visible_types]
+    if app_slug != "all":
+        filtered = [item for item in filtered if item["app_slug"] == app_slug]
+    return filtered
+
+
 def _recent_inbox_items(limit: int = 8) -> list[dict[str, object]]:
     items: list[dict[str, object]] = []
     for folder in INBOX_FOLDERS:
@@ -416,6 +532,15 @@ def _all_structured_inbox_items() -> list[dict[str, str]]:
         for path in _relative_md_files(f"04-inbox/{folder}"):
             items.append(_parse_structured_inbox_item(path))
     items.sort(key=lambda item: (item.get("mtime", 0), item["path"]), reverse=True)
+    return items
+
+
+def _inbox_queue_items() -> list[dict[str, object]]:
+    items = []
+    for folder in ["new", "bugs", "features", "support", "closed"]:
+        for path in _relative_md_files(f"04-inbox/{folder}"):
+            items.append(_parse_inbox_queue_item(path))
+    items.sort(key=lambda item: (item["mtime"], item["path"]), reverse=True)
     return items
 
 
@@ -1336,45 +1461,75 @@ def runbooks():
 @app.route("/inbox")
 @_require_worklog_session
 def inbox():
-    items = [
-        "04-inbox/new/example-inbox-item.md",
-        *sorted(str(path.relative_to(WORKLOG_ROOT)) for path in (WORKLOG_ROOT / "04-inbox/triaged").glob("*.md")),
-        *sorted(str(path.relative_to(WORKLOG_ROOT)) for path in (WORKLOG_ROOT / "04-inbox/bugs").glob("*.md")),
-        *sorted(str(path.relative_to(WORKLOG_ROOT)) for path in (WORKLOG_ROOT / "04-inbox/features").glob("*.md")),
-        *sorted(str(path.relative_to(WORKLOG_ROOT)) for path in (WORKLOG_ROOT / "04-inbox/support").glob("*.md")),
-        *sorted(str(path.relative_to(WORKLOG_ROOT)) for path in (WORKLOG_ROOT / "04-inbox/closed").glob("*.md")),
-    ]
-    return render_template("listing.html", title="Inbox", items=items)
+    inbox_type = (request.args.get("type") or "all").strip().lower()
+    if inbox_type == "triaged":
+        inbox_type = "all"
+    if inbox_type not in INBOX_TYPES:
+        inbox_type = "all"
+    app_slug = _normalize_app_filter(request.args.get("app"))
+    items = _filter_inbox_queue_items(_inbox_queue_items(), inbox_type, app_slug)
+    filters = {
+        "type": inbox_type,
+        "app": app_slug,
+    }
+    return render_template(
+        "inbox.html",
+        title="Inbox",
+        items=items,
+        inbox_type=inbox_type,
+        app_filter=app_slug,
+        filters=filters,
+        inbox_types=[
+            {"value": "all", "label": "All"},
+            {"value": "new", "label": "New"},
+            {"value": "bugs", "label": "Bugs"},
+            {"value": "features", "label": "Features"},
+            {"value": "support", "label": "Support"},
+            {"value": "closed", "label": "Closed"},
+        ],
+        app_filters=[
+            {"value": "all", "label": "All Apps"},
+            {"value": "core", "label": "Core"},
+            {"value": "unity", "label": "Unity"},
+            {"value": "ims", "label": "IMS"},
+            {"value": "cy-storage", "label": "CY Storage"},
+            {"value": "dispatch", "label": "Dispatch"},
+            {"value": "parking", "label": "Parking"},
+            {"value": "hiring", "label": "Hiring"},
+            {"value": "worklog", "label": "Worklog"},
+            {"value": "other", "label": "Other"},
+        ],
+    )
 
 
 @app.route("/inbox/new")
 @_require_worklog_session
 def inbox_new():
-    return render_template("listing.html", title="Inbox / New", items=_category_files("04-inbox/new"))
+    return redirect(url_for("inbox", type="new"))
 
 
 @app.route("/inbox/bugs")
 @_require_worklog_session
 def inbox_bugs():
-    return render_template("listing.html", title="Inbox / Bugs", items=_category_files("04-inbox/bugs"))
+    return redirect(url_for("inbox", type="bugs"))
 
 
 @app.route("/inbox/features")
 @_require_worklog_session
 def inbox_features():
-    return render_template("listing.html", title="Inbox / Features", items=_category_files("04-inbox/features"))
+    return redirect(url_for("inbox", type="features"))
 
 
 @app.route("/inbox/support")
 @_require_worklog_session
 def inbox_support():
-    return render_template("listing.html", title="Inbox / Support", items=_category_files("04-inbox/support"))
+    return redirect(url_for("inbox", type="support"))
 
 
 @app.route("/inbox/closed")
 @_require_worklog_session
 def inbox_closed():
-    return render_template("listing.html", title="Inbox / Closed", items=_category_files("04-inbox/closed"))
+    return redirect(url_for("inbox", type="closed"))
 
 
 @app.route("/intake", methods=["GET", "POST"])

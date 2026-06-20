@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card surface-card card-shadow border-0 mb-4">
+  <div class="card-body p-4 p-xl-5">
+    <div class="d-flex flex-column flex-xl-row justify-content-between gap-4 align-items-xl-start">
+      <div>
+        <div class="eyebrow text-uppercase text-secondary small fw-semibold mb-2">Worklog Inbox</div>
+        <h1 class="h2 mb-2">Operational inbox</h1>
+        <p class="text-secondary mb-0">Filter by item type and app/product. Open items only are shown unless Closed is selected.</p>
+      </div>
+      <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('dashboard') }}">Dashboard</a>
+        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('assistant') }}">Idea Inventory</a>
+        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('intake') }}">Structured Intake</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="card surface-card card-shadow border-0 mb-4">
+  <div class="card-body p-4 p-xl-5">
+    <form method="get" action="{{ url_for('inbox') }}" class="row g-3 align-items-end">
+      <div class="col-12 col-md-6 col-xl-3">
+        <label class="form-label">Category</label>
+        <select class="form-select" name="type">
+          {% for option in inbox_types %}
+            <option value="{{ option.value }}" {% if option.value == inbox_type %}selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-md-6 col-xl-3">
+        <label class="form-label">App / Product</label>
+        <select class="form-select" name="app">
+          {% for option in app_filters %}
+            <option value="{{ option.value }}" {% if option.value == app_filter %}selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-xl-6 d-flex flex-wrap gap-2">
+        <button class="btn btn-primary" type="submit">Apply filters</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('inbox') }}">Reset</a>
+      </div>
+    </form>
+  </div>
+</section>
+
+<section class="card surface-card card-shadow border-0">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table inbox-table align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Title</th>
+            <th>App / Product</th>
+            <th>Priority</th>
+            <th>Status</th>
+            <th>Created / Updated</th>
+            <th>Source</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if items %}
+            {% for item in items %}
+              <tr>
+                <td><span class="badge text-bg-light border">{{ item.type|title }}</span></td>
+                <td>
+                  <div class="fw-semibold">{{ item.title }}</div>
+                  {% if item.summary %}
+                    <div class="text-secondary small">{{ item.summary }}</div>
+                  {% endif %}
+                </td>
+                <td>
+                  <span class="badge {% if item.app_slug == 'other' %}text-bg-light border{% else %}text-bg-primary{% endif %}">
+                    {{ item.app_label }}
+                  </span>
+                </td>
+                <td>
+                  <span class="badge {% if item.priority|lower in ['urgent', 'high'] %}text-bg-danger{% elif item.priority|lower == 'medium' %}text-bg-warning{% else %}text-bg-secondary{% endif %}">
+                    {{ item.priority|title }}
+                  </span>
+                </td>
+                <td>
+                  <span class="badge {% if item.status|lower in ['closed', 'resolved', 'done', 'shipped'] %}text-bg-success{% else %}text-bg-light border{% endif %}">
+                    {{ item.status or 'Open' }}
+                  </span>
+                </td>
+                <td class="text-nowrap">{{ item.created_updated }}</td>
+                <td>{{ item.source }}</td>
+                <td>
+                  <div class="d-flex flex-wrap gap-2">
+                    <a class="btn btn-outline-primary btn-sm" href="{{ url_for('view_file', relative_path=item.path) }}">View</a>
+                    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('view_file', relative_path=item.path) }}">Open Source File</a>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="8" class="p-4">
+                <div class="text-secondary">No inbox items match the selected filters.</div>
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -69,7 +69,7 @@
 
             <div class="d-flex flex-wrap gap-2 mt-3">
               <a class="btn btn-outline-primary btn-sm" href="{{ url_for('view_file', relative_path=app.path) }}">Active work</a>
-              <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('inbox') }}">Inbox{% if app.inbox_items %} ({{ app.inbox_items|length }}){% endif %}</a>
+              <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('inbox', app=app.title|lower|replace(' ', '-') ) }}">Inbox{% if app.inbox_items %} ({{ app.inbox_items|length }}){% endif %}</a>
             </div>
           </div>
         </div>

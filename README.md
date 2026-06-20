@@ -87,6 +87,13 @@ sudo systemctl status worklog-dev.service --no-pager
 - App status summary for Core, Unity, IMS, Dispatch, Parking, CY Storage, and Worklog
 - Inbox summary with the newest items first
 
+## Inbox Layout
+
+- `/inbox` renders the operational inbox table with category and app/product filters
+- `All` shows open items only and excludes `Closed`
+- `Closed` shows only closed items
+- Legacy `/inbox/new`, `/inbox/bugs`, `/inbox/features`, `/inbox/support`, and `/inbox/closed` routes now redirect to the table with the matching filter
+
 ## Systemd Example
 
 See `deployment/worklog-dev.service.example`.
