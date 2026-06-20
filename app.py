@@ -2035,11 +2035,16 @@ def assistant_message():
 def assistant_digest_preview():
     payload = request.get_json(silent=True) or {}
     thought_paths = payload.get("thought_paths") or []
+    selected_only = bool(payload.get("selected_only"))
     if thought_paths:
         thoughts = _thoughts_by_paths([str(path) for path in thought_paths])
     else:
         thoughts = _thought_box_items(digested_only=False)
+    if selected_only and not thoughts:
+        return {"ok": False, "error": "Select at least one raw idea before digesting."}, 400
     preview = _digest_groups_from_items(thoughts)
+    preview["selection_mode"] = "selected" if thought_paths else "all"
+    preview["selected_thought_paths"] = [str(path) for path in thought_paths]
     return {"ok": True, "digest_preview": preview, "thought_count": len(thoughts)}
 
 
@@ -2049,7 +2054,9 @@ def assistant_approve_digest():
     payload = request.get_json(silent=True) or {}
     preview = payload.get("digest_preview") or {}
     source_paths = [str(path) for path in preview.get("source_thoughts", [])]
-    thoughts = _thoughts_by_paths(source_paths)
+    selected_paths = [str(path) for path in preview.get("selected_thought_paths", [])]
+    target_paths = selected_paths or source_paths
+    thoughts = _thoughts_by_paths(target_paths)
     if not thoughts:
         return {"ok": False, "error": "No active thoughts available for approval."}, 400
 
@@ -2071,6 +2078,7 @@ def assistant_approve_digest():
             "created_at": datetime.now(timezone.utc).isoformat(),
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "proposed_work": proposal.get("proposed_work") or [],
+            "selected_thought_paths": target_paths,
             "digested_source_thoughts": [],
         }
         handoff_path = _write_sprint_handoff_file(sprint_record)

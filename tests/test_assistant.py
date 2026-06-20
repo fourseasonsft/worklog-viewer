@@ -99,6 +99,8 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("Active Idea Inventory", html)
         self.assertIn("Digest by App/Product", html)
         self.assertIn("Approved Sprint Handoffs", html)
+        self.assertIn("Digest Selected", html)
+        self.assertIn("select-all-ideas", html)
 
     def test_message_stores_raw_idea(self) -> None:
         response = self._client().post(
@@ -127,6 +129,39 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertTrue(thought.exists())
         html = response.get_data(as_text=True)
         self.assertIn("Sprint Groups", html)
+
+    def test_digest_selected_only_includes_selected_ideas(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-ims.md",
+            "# IMS\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs break bulk handling.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs break bulk handling.\n",
+        )
+        self._write_thought(
+            "2026-06-20-100001-worklog.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:01Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Worklog needs queue selection.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Worklog needs queue selection.\n",
+        )
+        preview = self._client().post(
+            "/api/assistant/digest-preview",
+            json={
+                "thought_paths": ["04-inbox/thought-box/2026-06-20-100000-ims.md"],
+                "selected_only": True,
+            },
+        ).get_json()["digest_preview"]
+        self.assertEqual(preview["selection_mode"], "selected")
+        self.assertEqual(preview["selected_thought_paths"], ["04-inbox/thought-box/2026-06-20-100000-ims.md"])
+        self.assertEqual(preview["source_thoughts"], ["04-inbox/thought-box/2026-06-20-100000-ims.md"])
+        self.assertEqual(len(preview["active_items"]), 1)
+
+    def test_digest_all_includes_all_active_ideas(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-ims.md",
+            "# IMS\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs break bulk handling.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs break bulk handling.\n",
+        )
+        self._write_thought(
+            "2026-06-20-100001-worklog.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:01Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Worklog needs queue selection.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Worklog needs queue selection.\n",
+        )
+        preview = self._client().post("/api/assistant/digest-preview", json={"selected_only": False, "thought_paths": []}).get_json()["digest_preview"]
+        self.assertEqual(len(preview["active_items"]), 2)
 
     def test_digest_groups_by_app_and_sprint_group(self) -> None:
         self._write_thought(
@@ -176,6 +211,38 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("## Codex/ChatGPT Starting Prompt", handoff_text)
         self.assertIn("## Source Ideas", handoff_text)
         self.assertTrue(list((self.root / "04-inbox/thought-box/digested").glob("*.md")))
+
+    def test_approve_digest_only_moves_selected_thoughts(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-ims.md",
+            "# IMS\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs break bulk handling.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs break bulk handling.\n",
+        )
+        self._write_thought(
+            "2026-06-20-100001-worklog.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:01Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Worklog needs queue selection.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Worklog needs queue selection.\n",
+        )
+        preview = self._client().post(
+            "/api/assistant/digest-preview",
+            json={
+                "thought_paths": ["04-inbox/thought-box/2026-06-20-100000-ims.md"],
+                "selected_only": True,
+            },
+        ).get_json()["digest_preview"]
+        response = self._client().post("/api/assistant/approve-digest", json={"digest_preview": preview})
+        self.assertEqual(response.status_code, 200)
+        digested = sorted(p.name for p in (self.root / "04-inbox/thought-box/digested").glob("*.md"))
+        active = sorted(p.name for p in (self.root / "04-inbox/thought-box").glob("*.md"))
+        self.assertEqual(len(digested), 1)
+        self.assertEqual(len(active), 1)
+        self.assertIn("2026-06-20-100001-worklog.md", active[0])
+
+    def test_empty_selection_returns_clear_error(self) -> None:
+        response = self._client().post(
+            "/api/assistant/digest-preview",
+            json={"thought_paths": [], "selected_only": True},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Select at least one raw idea", response.get_json()["error"])
 
     def test_handoff_includes_source_ideas_and_prompt(self) -> None:
         self._write_thought(

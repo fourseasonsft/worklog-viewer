@@ -15,7 +15,6 @@
         <div class="d-flex flex-wrap gap-2 justify-content-lg-end">
           <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('dashboard') }}">Dashboard</a>
           <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('intake') }}">Structured Intake</a>
-          <button class="btn btn-primary btn-sm" type="button" id="proposed-update-button">Digest Sprint Groups</button>
         </div>
       </div>
     </div>
@@ -23,6 +22,19 @@
 
   <section class="card surface-card card-shadow border-0 mb-4">
     <div class="card-body p-4 p-xl-5">
+      <div id="inventory-action-bar" class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center mb-3">
+        <div>
+          <div class="text-uppercase text-secondary small fw-semibold mb-2">Inventory Actions</div>
+          <div class="d-flex flex-wrap align-items-center gap-2">
+            <span class="badge text-bg-light border" id="selected-count-badge">0 selected</span>
+            <button class="btn btn-primary btn-sm" type="button" id="digest-selected-button" disabled>Digest Selected</button>
+            <button class="btn btn-outline-primary btn-sm" type="button" id="digest-all-button">Digest All</button>
+            <button class="btn btn-outline-secondary btn-sm" type="button" id="archive-selected-button" disabled>Archive Selected</button>
+            <button class="btn btn-outline-secondary btn-sm" type="button" id="clear-selection-button" disabled>Clear Selection</button>
+          </div>
+        </div>
+        <div id="selection-status" class="text-secondary small">Select one or more raw ideas to digest a focused inventory slice.</div>
+      </div>
       <form id="assistant-form" class="assistant-form">
         <div class="d-flex justify-content-between align-items-end gap-3 mb-3">
           <div>
@@ -54,6 +66,9 @@
         <table class="table inbox-table align-middle mb-0">
           <thead>
             <tr>
+              <th class="text-nowrap">
+                <input class="form-check-input" type="checkbox" id="select-all-ideas">
+              </th>
               <th>Created</th>
               <th>Raw Thought</th>
               <th>Inferred App/Product</th>
@@ -65,6 +80,9 @@
             {% if conversation %}
               {% for item in conversation %}
                 <tr data-thought-path="{{ item.path }}">
+                  <td>
+                    <input class="form-check-input idea-select" type="checkbox" value="{{ item.path }}" data-thought-path="{{ item.path }}">
+                  </td>
                   <td class="text-nowrap">{{ item.created_at or item.mtime_display or 'Unknown' }}</td>
                   <td>
                     <div class="fw-semibold">{{ item.title }}</div>
@@ -87,7 +105,7 @@
                 </tr>
               {% endfor %}
             {% else %}
-              <tr><td colspan="5" class="text-secondary">No active raw ideas yet.</td></tr>
+              <tr><td colspan="6" class="text-secondary">No active raw ideas yet.</td></tr>
             {% endif %}
           </tbody>
         </table>
@@ -201,9 +219,13 @@
 <script>
 (() => {
   const form = document.getElementById('assistant-form');
-  const proposedUpdateButton = document.getElementById('proposed-update-button');
   const approveButton = document.getElementById('approve-digest-button');
   const cancelButton = document.getElementById('cancel-digest-button');
+  const digestSelectedButton = document.getElementById('digest-selected-button');
+  const digestAllButton = document.getElementById('digest-all-button');
+  const archiveSelectedButton = document.getElementById('archive-selected-button');
+  const clearSelectionButton = document.getElementById('clear-selection-button');
+  const selectAll = document.getElementById('select-all-ideas');
   const status = document.getElementById('assistant-status');
   const input = form.querySelector('textarea[name="message"]');
   const previewBody = document.getElementById('digest-preview-body');
@@ -213,7 +235,30 @@
   const handoffTableBody = document.getElementById('handoff-table-body');
   const actionBar = document.getElementById('digest-actions');
   const ideaInventoryBody = document.getElementById('idea-inventory-body');
+  const selectedCountBadge = document.getElementById('selected-count-badge');
+  const selectionStatus = document.getElementById('selection-status');
   let digestPreview = {{ digest_preview | tojson if digest_preview else 'null' }};
+  let lastDigestMode = 'all';
+
+  function selectedCheckboxes() {
+    return Array.from(document.querySelectorAll('.idea-select:checked'));
+  }
+
+  function selectedPaths() {
+    return selectedCheckboxes().map((checkbox) => checkbox.value);
+  }
+
+  function syncSelectionUI() {
+    const count = selectedCheckboxes().length;
+    selectedCountBadge.textContent = `${count} selected`;
+    digestSelectedButton.disabled = count === 0;
+    archiveSelectedButton.disabled = count === 0;
+    clearSelectionButton.disabled = count === 0;
+    const allCheckboxes = Array.from(document.querySelectorAll('.idea-select'));
+    selectAll.checked = allCheckboxes.length > 0 && count === allCheckboxes.length;
+    selectAll.indeterminate = count > 0 && count < allCheckboxes.length;
+    selectionStatus.textContent = count > 0 ? `${count} raw idea${count === 1 ? '' : 's'} selected.` : 'Select one or more raw ideas to digest a focused inventory slice.';
+  }
 
   function renderPreview(data) {
     digestPreview = data;
@@ -264,7 +309,7 @@
     const data = await res.json();
     ideaInventoryBody.innerHTML = '';
     if (!data.thoughts || !data.thoughts.length) {
-      ideaInventoryBody.innerHTML = '<tr><td colspan="5" class="text-secondary">No active raw ideas yet.</td></tr>';
+      ideaInventoryBody.innerHTML = '<tr><td colspan="6" class="text-secondary">No active raw ideas yet.</td></tr>';
       return;
     }
     data.thoughts.forEach((item) => {
@@ -290,12 +335,17 @@
     bindArchiveButtons();
   }
 
-  async function requestDigest() {
-    status.textContent = 'Building sprint groups...';
+  async function requestDigest(selectedOnly) {
+    const thought_paths = selectedOnly ? selectedPaths() : [];
+    if (selectedOnly && thought_paths.length === 0) {
+      status.textContent = 'Select at least one raw idea before digesting.';
+      return;
+    }
+    status.textContent = selectedOnly ? 'Building sprint groups from selected ideas...' : 'Building sprint groups...';
     const res = await fetch('{{ url_for("assistant_digest_preview") }}', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({thought_paths: []}),
+      body: JSON.stringify({thought_paths, selected_only: selectedOnly}),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -303,7 +353,7 @@
       return;
     }
     renderPreview(data.digest_preview);
-    status.textContent = 'Sprint groups ready.';
+    status.textContent = selectedOnly ? 'Sprint groups ready for selected ideas.' : 'Sprint groups ready.';
   }
 
   async function sendMessage(message) {
@@ -318,7 +368,7 @@
       || trimmed.toLowerCase() === 'proposed update review'
       || trimmed.toLowerCase() === 'digest sprint groups';
     if (digestRequest) {
-      await requestDigest();
+      await requestDigest(false);
       input.value = '';
       return;
     }
@@ -391,15 +441,54 @@
     });
   }
 
+  function bindSelectionControls() {
+    document.querySelectorAll('.idea-select').forEach((checkbox) => {
+      checkbox.addEventListener('change', syncSelectionUI);
+    });
+    selectAll?.addEventListener('change', () => {
+      document.querySelectorAll('.idea-select').forEach((checkbox) => {
+        checkbox.checked = selectAll.checked;
+      });
+      syncSelectionUI();
+    });
+    clearSelectionButton?.addEventListener('click', () => {
+      document.querySelectorAll('.idea-select').forEach((checkbox) => {
+        checkbox.checked = false;
+      });
+      syncSelectionUI();
+    });
+    digestSelectedButton?.addEventListener('click', () => requestDigest(true));
+    digestAllButton?.addEventListener('click', () => requestDigest(false));
+    archiveSelectedButton?.addEventListener('click', async () => {
+      const thought_paths = selectedPaths();
+      if (!thought_paths.length) {
+        status.textContent = 'Select at least one raw idea before archiving.';
+        return;
+      }
+      status.textContent = 'Archiving selected ideas...';
+      for (const thought_path of thought_paths) {
+        await fetch('{{ url_for("assistant_archive_thought") }}', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({thought_path}),
+        });
+      }
+      await refreshIdeas();
+      status.textContent = 'Selected ideas archived.';
+      syncSelectionUI();
+    });
+  }
+
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     sendMessage(input.value);
   });
 
-  proposedUpdateButton.addEventListener('click', requestDigest);
   if (approveButton) approveButton.addEventListener('click', approveDigest);
   if (cancelButton) cancelButton.addEventListener('click', cancelDigest);
   bindArchiveButtons();
+  bindSelectionControls();
+  syncSelectionUI();
 })();
 </script>
 {% endblock %}
