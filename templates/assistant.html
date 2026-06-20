@@ -181,36 +181,87 @@
     <div class="col-12 col-xl-7">
       <div class="card surface-card card-shadow border-0 h-100">
         <div class="card-body p-4 p-xl-5">
-          <div class="text-uppercase text-secondary small fw-semibold mb-2">Approved Sprint Handoffs</div>
+          <div class="text-uppercase text-secondary small fw-semibold mb-2">Proposed Sprint Groups</div>
           <div class="table-responsive mb-3">
             <table class="table inbox-table align-middle mb-0">
               <thead>
                 <tr>
+                  <th>Select</th>
+                  <th>Sprint Group</th>
                   <th>App/Product</th>
-                  <th>Sprint Group Name</th>
-                  <th>Handoff MD</th>
+                  <th>Ideas Included</th>
+                  <th>Scope</th>
+                  <th>Status</th>
+                  <th>Sprint Code</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
-              <tbody id="handoff-table-body">
-                {% if digest_preview and digest_preview.approved_handoffs %}
-                  {% for group in digest_preview.approved_handoffs %}
+              <tbody id="proposed-groups-body">
+                {% if proposed_groups %}
+                  {% for group in proposed_groups %}
                     <tr>
+                      <td><input class="form-check-input proposal-select" type="checkbox" value="{{ group.proposal_id }}"></td>
+                      <td class="fw-semibold">{{ group.sprint_group_name }}</td>
                       <td>{{ group.app_product }}</td>
-                      <td>{{ group.sprint_group_name }}</td>
-                      <td><code class="small">{{ group.sprint_group_name|lower|replace(' ', '-') }}.md</code></td>
+                      <td>{{ group.ideas_included }}</td>
+                      <td>{{ group.scope }}</td>
+                      <td><span class="badge text-bg-warning">{{ group.status or 'Proposed / Awaiting Approval' }}</span></td>
+                      <td>{{ group.sprint_code or 'Pending' }}</td>
+                      <td>
+                        <div class="d-flex flex-wrap gap-2">
+                          <button class="btn btn-outline-primary btn-sm view-proposal-button" type="button" data-proposal-id="{{ group.proposal_id }}">View</button>
+                          <button class="btn btn-primary btn-sm approve-proposal-button" type="button" data-proposal-id="{{ group.proposal_id }}">Approve</button>
+                          <button class="btn btn-outline-secondary btn-sm reject-proposal-button" type="button" data-proposal-id="{{ group.proposal_id }}">Reject / Keep Ideas in Inventory</button>
+                        </div>
+                      </td>
                     </tr>
                   {% endfor %}
                 {% else %}
-                  <tr><td colspan="3" class="text-secondary">No approved sprint handoffs yet.</td></tr>
+                  <tr><td colspan="8" class="text-secondary">No proposed sprint groups yet. Select ideas above and digest them.</td></tr>
                 {% endif %}
               </tbody>
             </table>
           </div>
-          <div id="digest-actions" class="d-flex flex-wrap gap-2 {% if not digest_preview %}d-none{% endif %}">
-            <button class="btn btn-primary" type="button" id="approve-digest-button">Approve Sprint Groups</button>
-            <button class="btn btn-outline-secondary" type="button" id="cancel-digest-button">Keep Ideas in Inventory</button>
+          <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-primary" type="button" id="approve-selected-groups-button">Approve Selected Groups</button>
+            <button class="btn btn-outline-secondary" type="button" id="reject-selected-groups-button">Reject Selected Groups</button>
+            <button class="btn btn-outline-secondary" type="button" id="clear-proposed-groups-button">Clear Proposed Groups</button>
           </div>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card surface-card card-shadow border-0 mb-4">
+    <div class="card-body p-4 p-xl-5">
+      <div class="text-uppercase text-secondary small fw-semibold mb-2">Approved Sprint Queue</div>
+      <div class="table-responsive">
+        <table class="table inbox-table align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Sprint Code</th>
+              <th>Sprint Name</th>
+              <th>App</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="approved-sprints-body">
+            {% if approved_sprints %}
+              {% for record in approved_sprints %}
+                <tr>
+                  <td>{{ record.sprint_code }}</td>
+                  <td>{{ record.title }}</td>
+                  <td>{{ record.app_product }}</td>
+                  <td>{{ record.status }}</td>
+                  <td><a href="{{ url_for('sprint_detail', sprint_id=record.id) }}">View</a></td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr><td colspan="5" class="text-secondary">No approved sprint records yet.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
       </div>
     </div>
   </section>
@@ -223,8 +274,6 @@
 <script>
 (() => {
   const form = document.getElementById('assistant-form');
-  const approveButton = document.getElementById('approve-digest-button');
-  const cancelButton = document.getElementById('cancel-digest-button');
   const digestSelectedButton = document.getElementById('digest-selected-button');
   const digestAllButton = document.getElementById('digest-all-button');
   const archiveSelectedButton = document.getElementById('archive-selected-button');
@@ -236,13 +285,18 @@
   const previewEmpty = document.getElementById('digest-preview-empty');
   const digestAppTable = document.getElementById('digest-app-table');
   const digestSprintTable = document.getElementById('digest-sprint-table');
-  const handoffTableBody = document.getElementById('handoff-table-body');
+  const proposedGroupsBody = document.getElementById('proposed-groups-body');
+  const approvedSprintsBody = document.getElementById('approved-sprints-body');
   const ideaInventoryBody = document.getElementById('idea-inventory-body');
   const selectedCountBadge = document.getElementById('selected-count-badge');
   const selectionStatus = document.getElementById('selection-status');
+  const approveSelectedGroupsButton = document.getElementById('approve-selected-groups-button');
+  const rejectSelectedGroupsButton = document.getElementById('reject-selected-groups-button');
+  const clearProposedGroupsButton = document.getElementById('clear-proposed-groups-button');
   const digestResult = document.getElementById('digest-result');
   let digestPreview = {{ digest_preview | tojson if digest_preview else 'null' }};
-  let lastDigestMode = 'all';
+  let proposedGroups = {{ proposed_groups | tojson if proposed_groups else '[]' }};
+  let approvedSprints = {{ approved_sprints | tojson if approved_sprints else '[]' }};
 
   function selectedCheckboxes() {
     return Array.from(document.querySelectorAll('.idea-select:checked'));
@@ -264,6 +318,13 @@
     digestResult.innerHTML = `${message}${links.length ? `<div class="mt-2 d-flex flex-wrap gap-2">${links.join('')}</div>` : ''}`;
   }
 
+  function syncProposalSelectionUI() {
+    const count = document.querySelectorAll('.proposal-select:checked').length;
+    if (approveSelectedGroupsButton) approveSelectedGroupsButton.disabled = count === 0;
+    if (rejectSelectedGroupsButton) rejectSelectedGroupsButton.disabled = count === 0;
+    if (clearProposedGroupsButton) clearProposedGroupsButton.disabled = (proposedGroups || []).length === 0;
+  }
+
   function syncSelectionUI() {
     const count = selectedCheckboxes().length;
     selectedCountBadge.textContent = `${count} selected`;
@@ -274,6 +335,62 @@
     selectAll.checked = allCheckboxes.length > 0 && count === allCheckboxes.length;
     selectAll.indeterminate = count > 0 && count < allCheckboxes.length;
     selectionStatus.textContent = count > 0 ? `${count} raw idea${count === 1 ? '' : 's'} selected.` : 'Select one or more raw ideas to digest a focused inventory slice.';
+  }
+
+  function renderProposedGroups(groups) {
+    proposedGroups = groups || [];
+    if (proposedGroupsBody) {
+      proposedGroupsBody.innerHTML = '';
+      if (!proposedGroups.length) {
+        proposedGroupsBody.innerHTML = '<tr><td colspan="8" class="text-secondary">No proposed sprint groups yet. Select ideas above and digest them.</td></tr>';
+      } else {
+        proposedGroups.forEach((group) => {
+          const tr = document.createElement('tr');
+          tr.dataset.proposalId = group.proposal_id || '';
+          tr.innerHTML = `
+            <td><input class="form-check-input proposal-select" type="checkbox" value="${group.proposal_id || ''}"></td>
+            <td class="fw-semibold">${group.sprint_group_name || ''}</td>
+            <td>${group.app_product || ''}</td>
+            <td>${group.ideas_included || 0}</td>
+            <td>${group.scope || ''}</td>
+            <td><span class="badge text-bg-warning">${group.status || 'Proposed / Awaiting Approval'}</span></td>
+            <td>${group.sprint_code || 'Pending'}</td>
+            <td>
+              <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-outline-primary btn-sm view-proposal-button" type="button" data-proposal-id="${group.proposal_id || ''}">View</button>
+                <button class="btn btn-primary btn-sm approve-proposal-button" type="button" data-proposal-id="${group.proposal_id || ''}">Approve</button>
+                <button class="btn btn-outline-secondary btn-sm reject-proposal-button" type="button" data-proposal-id="${group.proposal_id || ''}">Reject</button>
+              </div>
+            </td>
+          `;
+          proposedGroupsBody.appendChild(tr);
+        });
+      }
+    }
+    bindProposalButtons();
+    syncProposalSelectionUI();
+  }
+
+  function renderApprovedSprints(records) {
+    approvedSprints = records || [];
+    if (approvedSprintsBody) {
+      approvedSprintsBody.innerHTML = '';
+      if (!approvedSprints.length) {
+        approvedSprintsBody.innerHTML = '<tr><td colspan="5" class="text-secondary">No approved sprint records yet.</td></tr>';
+      } else {
+        approvedSprints.forEach((record) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${record.sprint_code || ''}</td>
+            <td>${record.sprint_group_name || record.title || ''}</td>
+            <td>${record.app_product || ''}</td>
+            <td>${record.status || ''}</td>
+            <td><a href="/sprints/${record.id}">View</a></td>
+          `;
+          approvedSprintsBody.appendChild(tr);
+        });
+      }
+    }
   }
 
   function renderPreview(data) {
@@ -306,18 +423,8 @@
         digestSprintTable.appendChild(tr);
       });
     }
-    if (handoffTableBody) {
-      handoffTableBody.innerHTML = '';
-      (data.approved_handoffs || []).forEach((group) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${group.app_product || ''}</td>
-          <td>${group.sprint_group_name || ''}</td>
-          <td><code class="small">${(group.sprint_group_name || '').toLowerCase().replace(/\s+/g, '-')}.md</code></td>
-        `;
-        handoffTableBody.appendChild(tr);
-      });
-    }
+    renderProposedGroups(data.proposed_groups || proposedGroups);
+    renderApprovedSprints(data.approved_sprint_summaries || approvedSprints);
   }
 
   async function refreshIdeas() {
@@ -415,16 +522,11 @@
     await refreshIdeas();
   }
 
-  async function approveDigest() {
-    if (!digestPreview) {
-      status.textContent = 'Build sprint groups first.';
-      return;
-    }
-    status.textContent = 'Approving sprint groups...';
-    const res = await fetch('{{ url_for("assistant_approve_digest") }}', {
+  async function runProposalAction(action, proposalIds) {
+    const res = await fetch('{{ url_for("assistant_proposed_group_action_route") }}', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({digest_preview: digestPreview}),
+      body: JSON.stringify({action, proposal_ids: proposalIds}),
     });
     let data = null;
     try {
@@ -435,8 +537,8 @@
       return;
     }
     if (!res.ok) {
-      showDigestResult(data.error || 'Approval failed.', 'danger');
-      status.textContent = data.error || 'Approval failed.';
+      showDigestResult(data.error || 'Proposal action failed.', 'danger');
+      status.textContent = data.error || 'Proposal action failed.';
       return;
     }
     const links = [];
@@ -449,24 +551,40 @@
     if (Array.isArray(data.handoff_urls) && data.handoff_urls[0]) {
       links.push(`<a class="btn btn-sm btn-outline-primary" href="${data.handoff_urls[0]}">View Handoff</a>`);
     }
-    showDigestResult(data.assistant_reply || 'Approved.', 'success', links);
-    status.textContent = data.assistant_reply || 'Approved.';
-    if (data.skipped_selected_thought_ids?.length || data.skipped_selected_thought_paths?.length) {
-      const skipped = [...(data.skipped_selected_thought_ids || []), ...(data.skipped_selected_thought_paths || [])];
-      status.textContent += ` Skipped: ${skipped.join(', ')}.`;
-    }
-    digestPreview = null;
-    previewBody.classList.add('d-none');
-    previewEmpty.classList.remove('d-none');
+    showDigestResult(data.assistant_reply || 'Updated proposed sprint groups.', 'success', links);
+    status.textContent = data.assistant_reply || 'Updated proposed sprint groups.';
+    renderProposedGroups(data.proposed_groups || []);
+    renderApprovedSprints(data.approved_sprint_summaries || approvedSprints);
     await refreshIdeas();
   }
 
-  async function cancelDigest() {
-    digestPreview = null;
-    clearDigestResult();
-    previewBody.classList.add('d-none');
-    previewEmpty.classList.remove('d-none');
-    status.textContent = 'Sprint groups cleared. Ideas kept raw.';
+  function selectedProposalIds() {
+    return Array.from(document.querySelectorAll('.proposal-select:checked')).map((checkbox) => checkbox.value);
+  }
+
+  async function approveSelectedGroups() {
+    const proposal_ids = selectedProposalIds();
+    if (!proposal_ids.length) {
+      status.textContent = 'Select one or more proposed groups first.';
+      return;
+    }
+    status.textContent = 'Approving proposed sprint groups...';
+    await runProposalAction('approve_selected', proposal_ids);
+  }
+
+  async function rejectSelectedGroups() {
+    const proposal_ids = selectedProposalIds();
+    if (!proposal_ids.length) {
+      status.textContent = 'Select one or more proposed groups first.';
+      return;
+    }
+    status.textContent = 'Rejecting proposed sprint groups...';
+    await runProposalAction('reject_selected', proposal_ids);
+  }
+
+  async function clearProposedGroups() {
+    status.textContent = 'Clearing proposed sprint groups...';
+    await runProposalAction('clear_all', []);
   }
 
   async function archiveThought(path) {
@@ -489,6 +607,28 @@
     document.querySelectorAll('.archive-button').forEach((button) => {
       button.onclick = () => archiveThought(button.dataset.thoughtPath);
     });
+  }
+
+  function bindProposalButtons() {
+    document.querySelectorAll('.proposal-select').forEach((checkbox) => {
+      checkbox.addEventListener('change', syncProposalSelectionUI);
+    });
+    document.querySelectorAll('.view-proposal-button').forEach((button) => {
+      button.onclick = () => {
+        const group = (proposedGroups || []).find((item) => item.proposal_id === button.dataset.proposalId);
+        if (!group) return;
+        showDigestResult(group.handoff_md || group.recommended_first_step || 'No handoff preview.', 'info');
+      };
+    });
+    document.querySelectorAll('.approve-proposal-button').forEach((button) => {
+      button.onclick = () => runProposalAction('approve_selected', [button.dataset.proposalId]);
+    });
+    document.querySelectorAll('.reject-proposal-button').forEach((button) => {
+      button.onclick = () => runProposalAction('reject_selected', [button.dataset.proposalId]);
+    });
+    if (approveSelectedGroupsButton) approveSelectedGroupsButton.onclick = approveSelectedGroups;
+    if (rejectSelectedGroupsButton) rejectSelectedGroupsButton.onclick = rejectSelectedGroups;
+    if (clearProposedGroupsButton) clearProposedGroupsButton.onclick = clearProposedGroups;
   }
 
   function bindSelectionControls() {
@@ -534,10 +674,11 @@
     sendMessage(input.value);
   });
 
-  if (approveButton) approveButton.addEventListener('click', approveDigest);
-  if (cancelButton) cancelButton.addEventListener('click', cancelDigest);
   bindArchiveButtons();
   bindSelectionControls();
+  bindProposalButtons();
+  renderProposedGroups(proposedGroups);
+  renderApprovedSprints(approvedSprints);
   syncSelectionUI();
 })();
 </script>

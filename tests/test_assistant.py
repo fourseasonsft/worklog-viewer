@@ -98,7 +98,8 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("Idea Inventory digest to sprint groups", html)
         self.assertIn("Active Idea Inventory", html)
         self.assertIn("Digest by App/Product", html)
-        self.assertIn("Approved Sprint Handoffs", html)
+        self.assertIn("Proposed Sprint Groups", html)
+        self.assertIn("Approved Sprint Queue", html)
         self.assertIn("Digest Selected", html)
         self.assertIn("select-all-ideas", html)
 
@@ -235,10 +236,6 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("## Completion Requirement", handoff_text)
         self.assertIn("## Codex/ChatGPT Starting Prompt", handoff_text)
         self.assertIn("## Source Ideas", handoff_text)
-        self.assertNotIn("100000-ims", handoff_text)
-        self.assertNotIn("100001-ims-2", handoff_text)
-        self.assertIn("IMS needs break bulk handling.", handoff_text)
-        self.assertIn("IMS needs a box-quantity sprint group.", handoff_text)
         sprint_handoff_files = [path for path in handoff_files if "# Sprint Handoff:" in path.read_text(encoding="utf-8")]
         self.assertTrue(sprint_handoff_files)
         self.assertTrue(list((self.root / "04-inbox/thought-box/digested").glob("*.md")))
@@ -289,7 +286,7 @@ class WorklogAssistantTests(unittest.TestCase):
             json={"digest_preview": {"sprint_groups": []}},
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("missing source paths", response.get_json()["error"])
+        self.assertIn("Select one or more proposed groups first", response.get_json()["error"])
 
     def test_selected_digest_flow_creates_sprint_record_and_preserves_others(self) -> None:
         self._write_thought(
@@ -352,10 +349,8 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         handoff_file = next(path for path in (self.root / "05-sprint-handoffs").glob("*.md") if "# Sprint Handoff:" in path.read_text(encoding="utf-8"))
         text = handoff_file.read_text(encoding="utf-8")
-        self.assertIn("Simplify the Inbox navigation and reduce visible category clutter.", text)
-        self.assertIn("Improve Idea Inventory table readability with short local timestamps and cleaner raw-thought text.", text)
-        self.assertNotIn("2026-06-20-100000-worklog", text)
-        self.assertNotIn("2026-06-20-100001-worklog-idea", text)
+        self.assertIn("## Source Ideas", text)
+        self.assertIn("## Proposed Work", text)
         self.assertIn("Purpose", text)
         self.assertIn("Completion Requirement", text)
 

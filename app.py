@@ -702,8 +702,169 @@ def _sprints_dir(status: str | None = None) -> Path:
 
 
 def _ensure_sprint_dirs() -> None:
-    for status in ["proposed", "approved", "active", "completed", "shipped"]:
+    for status in ["proposed", "rejected", "approved", "active", "completed", "shipped"]:
         _sprints_dir(status).mkdir(parents=True, exist_ok=True)
+
+
+def _proposal_record_path(proposal_id: str, title: str) -> Path:
+    return _sprints_dir("proposed") / f"{proposal_id}-{_slugify_title(title)}.md"
+
+
+def _proposal_id_prefix() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+
+
+def _generate_proposal_id() -> str:
+    existing = {record.get("proposal_id") for record in _proposed_sprint_records()}
+    for sequence in range(1, 1000):
+        proposal_id = f"pr-{_proposal_id_prefix()}-{sequence:03d}"
+        if proposal_id not in existing:
+            return proposal_id
+    raise ValueError("Unable to generate a unique proposal id.")
+
+
+def _write_proposed_sprint_record(group: dict[str, object]) -> Path:
+    _ensure_sprint_dirs()
+    proposal_id = str(group.get("proposal_id") or _generate_proposal_id())
+    title = str(group.get("sprint_group_name") or "Proposed Sprint Group")
+    path = _proposal_record_path(proposal_id, title)
+    source_idea_summaries = [str(item) for item in group.get("source_idea_summaries", [])]
+    source_thoughts = [str(item) for item in group.get("source_thoughts", [])]
+    proposed_work = [str(item) for item in group.get("proposed_work", [])]
+    text = "\n".join(
+        [
+            f"# Proposed Sprint Group: {title}",
+            "",
+            f"- proposal_id: {proposal_id}",
+            f"- sprint_group_name: {title}",
+            f"- app_product: {group.get('app_product') or 'Other'}",
+            f"- scope: {group.get('scope') or 'Small'}",
+            f"- status: proposed",
+            f"- created_at: {group.get('created_at') or datetime.now(timezone.utc).isoformat()}",
+            f"- updated_at: {datetime.now(timezone.utc).isoformat()}",
+            f"- source_thought_ids: {', '.join(str(item) for item in group.get('source_thought_ids', []))}",
+            f"- source_thought_paths: {', '.join(str(item) for item in group.get('source_thought_paths', []))}",
+            "",
+            "## Source Ideas",
+            *([f"- {item}" for item in source_idea_summaries] or [f"- {item}" for item in source_thoughts] or ["- None"]),
+            "",
+            "## Proposed Work",
+            *([f"- {item}" for item in proposed_work] or ["- Triage raw ideas into a focused sprint slice."]),
+            "",
+            "## Recommended First Step",
+            f"{group.get('recommended_first_step') or ''}",
+            "",
+            "## Handoff Preview",
+            str(group.get("handoff_md") or ""),
+            "",
+        ]
+    )
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _parse_proposed_sprint_record(path: Path) -> dict[str, object]:
+    text = path.read_text(encoding="utf-8")
+    meta = _parse_key_value_metadata(text)
+    source_ideas = []
+    proposed_work = []
+    current_section = None
+    for line in text.splitlines():
+        if line.startswith("## "):
+            current_section = line[3:].strip().lower()
+            continue
+        if current_section == "source ideas" and line.startswith("- "):
+            source_ideas.append(line[2:].strip())
+        elif current_section == "proposed work" and line.startswith("- "):
+            proposed_work.append(line[2:].strip())
+    return {
+        "proposal_id": meta.get("proposal_id") or path.stem.split("-", 1)[0],
+        "sprint_group_name": meta.get("sprint_group_name") or path.stem.split("-", 1)[1].replace("-", " ").title(),
+        "app_product": meta.get("app_product") or "Other",
+        "scope": meta.get("scope") or "Small",
+        "status": meta.get("status") or "proposed",
+        "created_at": meta.get("created_at") or _format_file_timestamp(path),
+        "updated_at": meta.get("updated_at") or _format_file_timestamp(path),
+        "source_thought_ids": [item.strip() for item in (meta.get("source_thought_ids") or "").split(",") if item.strip()],
+        "source_thought_paths": [item.strip() for item in (meta.get("source_thought_paths") or "").split(",") if item.strip()],
+        "source_ideas": source_ideas,
+        "proposed_work": proposed_work,
+        "recommended_first_step": meta.get("recommended_first_step") or _extract_section_text(text, "Recommended First Step"),
+        "handoff_md": _extract_section_text(text, "Handoff Preview"),
+        "path": str(path.relative_to(WORKLOG_ROOT)),
+        "raw_html": _render_markdown(text),
+    }
+
+
+def _proposed_sprint_records() -> list[dict[str, object]]:
+    _ensure_sprint_dirs()
+    records = [_parse_proposed_sprint_record(path) for path in sorted(_sprints_dir("proposed").glob("*.md"), reverse=True)]
+    records.sort(key=lambda item: (item.get("updated_at", ""), item.get("created_at", ""), item.get("proposal_id", "")), reverse=True)
+    return records
+
+
+def _proposed_sprint_record_by_id(proposal_id: str) -> dict[str, object] | None:
+    proposal_id = proposal_id.strip()
+    for record in _proposed_sprint_records():
+        if str(record.get("proposal_id") or "") == proposal_id:
+            return record
+    return None
+
+
+def _remove_proposed_sprint_record(proposal_id: str, status: str = "rejected") -> Path | None:
+    record = _proposed_sprint_record_by_id(proposal_id)
+    if not record:
+        return None
+    source = WORKLOG_ROOT / str(record["path"])
+    if not source.exists():
+        return None
+    if status == "rejected":
+        target = _sprints_dir("rejected") / source.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source.rename(target)
+        return target
+    source.unlink()
+    return source
+
+
+def _proposal_to_sprint_record(proposal: dict[str, object]) -> tuple[dict[str, object], Path, Path]:
+    active_thoughts = _thoughts_by_ids([str(item) for item in proposal.get("source_thought_ids", []) if str(item).strip()])
+    if not active_thoughts:
+        active_thoughts = _thoughts_by_paths([str(path) for path in proposal.get("source_thought_paths", [])])
+    if not active_thoughts and proposal.get("source_ideas"):
+        wanted = {str(item).strip().lower() for item in proposal.get("source_ideas", []) if str(item).strip()}
+        for item in _thought_box_items(digested_only=False):
+            normalized = str(item.get("normalized_summary") or item.get("display_snippet") or item.get("title") or "").strip().lower()
+            if normalized and normalized in wanted:
+                active_thoughts.append(item)
+    proposal_source_paths = [item["path"] for item in active_thoughts]
+    proposal_source_ids = [_thought_item_fingerprint(item) for item in active_thoughts]
+    proposal_source_summaries = [item.get("normalized_summary") or item.get("display_snippet") or item.get("title") for item in active_thoughts]
+    if not proposal_source_summaries and proposal.get("source_ideas"):
+        proposal_source_summaries = [str(item) for item in proposal.get("source_ideas", []) if str(item).strip()]
+    if not proposal.get("proposed_work") and proposal_source_summaries:
+        proposal = {**proposal, "proposed_work": proposal_source_summaries}
+    sprint_code = str(proposal.get("sprint_code") or _generate_sprint_code(str(proposal.get("app_product") or "Other")))
+    sprint_record = {
+        **proposal,
+        "status": "approved",
+        "sprint_id": proposal.get("sprint_id") or f"sp-{_sprint_id_prefix()}",
+        "sprint_code": sprint_code,
+        "created_at": proposal.get("created_at") or datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "proposed_work": proposal.get("proposed_work") or [],
+        "source_idea_summaries": proposal_source_summaries,
+        "selected_thought_paths": proposal_source_paths,
+        "selected_thought_ids": proposal_source_ids,
+        "source_thought_paths": proposal_source_paths,
+        "source_thought_ids": proposal_source_ids,
+        "digested_source_thoughts": [],
+    }
+    handoff_path = _write_sprint_handoff_file(sprint_record)
+    sprint_record["handoff_path"] = str(handoff_path.relative_to(WORKLOG_ROOT))
+    sprint_path = _write_sprint_record(sprint_record, "approved")
+    sprint_record["path"] = str(sprint_path.relative_to(WORKLOG_ROOT))
+    return sprint_record, handoff_path, sprint_path
 
 
 def _sprint_record_path(status: str, sprint_id: str, title: str) -> Path:
@@ -1624,28 +1785,35 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
             }
         )
 
-    handoffs = []
-    for group in sprint_groups:
-        handoffs.append(
-            {
-                "app_product": group["app_product"],
-                "sprint_group_name": group["sprint_group_name"],
-                "handoff_md": _build_handoff_markdown(group["app_product"], group["sprint_group_name"], group["thoughts"], group),
-                "source_thoughts": group["source_thoughts"],
-            }
-        )
-
     return {
         "plain_summary": f"{len(active_items)} active raw thought item(s) grouped into {len(app_groups)} app bucket(s) and {len(sprint_groups)} sprint group(s).",
         "active_items": active_items,
         "app_groups": app_groups,
         "sprint_groups": sprint_groups,
-        "approved_handoffs": handoffs,
         "source_thoughts": [item.get("path") for item in active_items],
         "source_idea_summaries": [item.get("normalized_summary") or item.get("display_snippet") or item.get("title") for item in active_items],
         "source_thought_paths": [item.get("path") for item in active_items],
         "source_thought_ids": [_thought_item_fingerprint(item) for item in active_items],
         "recommended_codex_prompt": "Create a focused implementation conversation from the sprint group table. Keep each group small enough to start a new chat cleanly.",
+    }
+
+
+def _proposal_view_from_group(group: dict[str, object]) -> dict[str, object]:
+    return {
+        "proposal_id": group.get("proposal_id") or "",
+        "sprint_group_name": group.get("sprint_group_name") or "",
+        "app_product": group.get("app_product") or "Other",
+        "ideas_included": len(group.get("source_thought_ids") or group.get("source_thought_paths") or []),
+        "scope": group.get("scope") or "Small",
+        "status": group.get("status") or "proposed",
+        "sprint_code": group.get("sprint_code") or "",
+        "source_thought_ids": group.get("source_thought_ids") or [],
+        "source_thought_paths": group.get("source_thought_paths") or [],
+        "source_ideas": group.get("source_ideas") or [],
+        "proposed_work": group.get("proposed_work") or [],
+        "recommended_first_step": group.get("recommended_first_step") or "",
+        "handoff_md": group.get("handoff_md") or "",
+        "path": group.get("path") or "",
     }
 
 
@@ -2121,6 +2289,8 @@ def assistant():
         "assistant.html",
         conversation=conversation,
         digest_preview=digest_preview,
+        proposed_groups=_proposed_sprint_records(),
+        approved_sprints=_sprint_records(),
         update_shipments=_assistant_update_shipments(),
         openai_enabled=_openai_available(),
         idea_inventory_count=len(_thought_box_items(digested_only=False)),
@@ -2290,6 +2460,21 @@ def assistant_digest_preview():
     if selected_only and not thoughts:
         return {"ok": False, "error": "Selected idea IDs no longer match active raw ideas."}, 400
     preview = _digest_groups_from_items(thoughts)
+    proposed_records = []
+    for group in preview.get("sprint_groups", []):
+        proposal = {
+            **group,
+            "proposal_id": group.get("proposal_id") or _generate_proposal_id(),
+            "status": "proposed",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "source_thought_paths": group.get("source_thoughts") or [],
+            "source_thought_ids": [str(item) for item in group.get("thoughts", []) and [_thought_item_fingerprint(item) for item in group.get("thoughts", [])] or []],
+            "source_idea_summaries": [thought.get("normalized_summary") or thought.get("display_snippet") or thought.get("raw_text_full") for thought in group.get("thoughts", [])],
+            "handoff_md": _build_handoff_markdown(group["app_product"], group["sprint_group_name"], group["thoughts"], group),
+        }
+        proposal["path"] = str(_write_proposed_sprint_record(proposal).relative_to(WORKLOG_ROOT))
+        proposed_records.append(_proposal_view_from_group(proposal))
     preview["selection_mode"] = "selected" if (thought_ids or thought_paths) else "all"
     preview["selected_thought_ids"] = [str(item) for item in thought_ids]
     preview["selected_idea_ids"] = [str(item) for item in thought_ids]
@@ -2298,6 +2483,17 @@ def assistant_digest_preview():
     preview["skipped_selected_thought_paths"] = skipped_selected_paths
     preview["source_thought_ids"] = [_thought_item_fingerprint(item) for item in thoughts]
     preview["source_thought_paths"] = [item.get("path") for item in thoughts]
+    preview["proposed_groups"] = proposed_records
+    preview["approved_sprint_summaries"] = [
+        {
+            "sprint_code": record.get("sprint_code") or "",
+            "sprint_group_name": record.get("title") or record.get("sprint_group_name") or "",
+            "app_product": record.get("app_product") or "Other",
+            "status": record.get("status") or "",
+            "path": record.get("path") or "",
+        }
+        for record in _sprint_records()[:8]
+    ]
     return {"ok": True, "digest_preview": preview, "thought_count": len(thoughts)}
 
 
@@ -2306,59 +2502,71 @@ def assistant_digest_preview():
 def assistant_approve_digest():
     payload = request.get_json(silent=True) or {}
     preview = payload.get("digest_preview") or {}
-    source_paths = [str(path) for path in preview.get("source_thought_paths") or preview.get("source_thoughts") or [] if str(path).strip()]
-    source_ids = [str(item) for item in preview.get("source_thought_ids") or [] if str(item).strip()]
-    selected_paths = [str(path) for path in preview.get("selected_thought_paths", []) if str(path).strip()]
-    selected_ids = [str(item) for item in (preview.get("selected_idea_ids") or preview.get("selected_thought_ids") or []) if str(item).strip()]
-    if not source_paths:
-        return {"ok": False, "error": "Approval payload is missing source paths. Re-run digest before approving."}, 400
-    if selected_ids:
-        thoughts = _thoughts_by_ids(selected_ids)
-    elif selected_paths:
-        thoughts = _thoughts_by_paths(selected_paths)
-    else:
-        thoughts = _thoughts_by_paths(source_paths)
-    if not thoughts:
-        return {"ok": False, "error": "No active thoughts available for approval."}, 400
-    valid_ids = {_thought_item_fingerprint(item) for item in thoughts}
-    valid_paths = {item["path"] for item in thoughts}
-    skipped_ids = [item_id for item_id in selected_ids if item_id not in valid_ids]
-    skipped_paths = [path for path in selected_paths if path not in valid_paths]
-    by_path = {item["path"]: item for item in thoughts}
-    source_items = [item for item in thoughts if item["path"] in source_paths]
-    if not source_items:
-        source_items = thoughts
+    proposal_ids = [str(item) for item in preview.get("proposal_ids") or preview.get("selected_proposal_ids") or [] if str(item).strip()]
+    if not proposal_ids:
+        proposal_ids = [str(item.get("proposal_id") or "") for item in preview.get("proposed_groups") or [] if str(item.get("proposal_id") or "").strip()]
+    if not proposal_ids and preview.get("sprint_groups"):
+        for group in preview.get("sprint_groups") or []:
+            thoughts = group.get("thoughts") or []
+            proposal = {
+                **group,
+                "proposal_id": _generate_proposal_id(),
+                "status": "proposed",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "source_thought_paths": [thought.get("path") for thought in thoughts if thought.get("path")],
+                "source_thought_ids": [_thought_item_fingerprint(thought) for thought in thoughts if thought.get("path")],
+                "source_idea_summaries": [thought.get("normalized_summary") or thought.get("display_snippet") or thought.get("raw_text_full") for thought in thoughts if thought.get("path")],
+                "handoff_md": _build_handoff_markdown(group["app_product"], group["sprint_group_name"], thoughts, group),
+            }
+            _write_proposed_sprint_record(proposal)
+            proposal_ids.append(proposal["proposal_id"])
+    return _assistant_proposed_group_action_impl(
+        action="approve_selected",
+        proposal_ids=proposal_ids,
+        payload=payload,
+    )
+
+
+@app.route("/api/assistant/proposed-group-action", methods=["POST"])
+@_require_worklog_session
+def assistant_proposed_group_action_route():
+    payload = request.get_json(silent=True) or {}
+    return _assistant_proposed_group_action_impl(action=payload.get("action"), proposal_ids=payload.get("proposal_ids"), payload=payload)
+
+
+def _assistant_proposed_group_action_impl(action: str | None = None, proposal_ids: list[str] | None = None, payload: dict[str, object] | None = None):
+    payload = payload or request.get_json(silent=True) or {}
+    action = (action or payload.get("action") or "").strip().lower()
+    proposal_ids = [str(item) for item in (proposal_ids if proposal_ids is not None else payload.get("proposal_ids") or []) if str(item).strip()]
+    if action not in {"approve_selected", "reject_selected", "clear_all"}:
+        return {"ok": False, "error": "Unsupported proposed group action."}, 400
+    if action != "clear_all" and not proposal_ids:
+        return {"ok": False, "error": "Select one or more proposed groups first."}, 400
+    proposal_records = _proposed_sprint_records()
+    if action != "clear_all":
+        proposal_records = [record for record in proposal_records if record.get("proposal_id") in set(proposal_ids)]
+    if not proposal_records and action != "clear_all":
+        return {"ok": False, "error": "No proposed sprint groups available for the selected action."}, 400
     moved_paths: list[str] = []
     created_handoffs: list[str] = []
     created_sprints: list[dict[str, str]] = []
-    for proposal in preview.get("sprint_groups", []):
-        proposal_paths = [str(path) for path in proposal.get("source_thoughts", [])]
-        active_thoughts = [by_path[path] for path in proposal_paths if path in by_path]
+    rejected_paths: list[str] = []
+    for proposal in proposal_records:
+        proposal_id = str(proposal.get("proposal_id") or "").strip()
+        if action == "reject_selected":
+            removed = _remove_proposed_sprint_record(proposal_id, "rejected")
+            if removed:
+                rejected_paths.append(str(removed.relative_to(WORKLOG_ROOT)))
+            continue
+        active_thoughts = _thoughts_by_ids([str(item) for item in proposal.get("source_thought_ids", []) if str(item).strip()])
+        if not active_thoughts:
+            active_thoughts = _thoughts_by_paths([str(path) for path in proposal.get("source_thought_paths", [])])
         if not active_thoughts:
             continue
-        fingerprints = {_thought_item_fingerprint(item) for item in active_thoughts}
-        if len(fingerprints) == 0:
-            continue
-        sprint_record = {
-            **proposal,
-            "status": "approved",
-            "sprint_id": proposal.get("sprint_id") or f"sp-{_sprint_id_prefix()}",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-            "proposed_work": proposal.get("proposed_work") or [],
-            "source_idea_summaries": proposal.get("source_idea_summaries") or [],
-            "selected_thought_paths": source_paths,
-            "selected_thought_ids": source_ids or selected_ids or [_thought_item_fingerprint(item) for item in source_items],
-            "source_thought_paths": source_paths,
-            "source_thought_ids": source_ids or [_thought_item_fingerprint(item) for item in source_items],
-            "digested_source_thoughts": [],
-        }
-        handoff_path = _write_sprint_handoff_file(sprint_record)
-        sprint_record["handoff_path"] = str(handoff_path.relative_to(WORKLOG_ROOT))
+        sprint_record, handoff_path, sprint_path = _proposal_to_sprint_record(proposal)
         moved_for_group: list[str] = []
         sprint_record["digested_source_thoughts"] = moved_for_group
-        sprint_path = _write_sprint_record(sprint_record, "approved")
-        sprint_record["path"] = str(sprint_path.relative_to(WORKLOG_ROOT))
         created_sprints.append({"path": sprint_record["path"], "sprint_id": str(sprint_record["sprint_id"]), "sprint_code": str(sprint_record["sprint_code"])})
         created_handoffs.append(str(handoff_path.relative_to(WORKLOG_ROOT)))
         for thought in active_thoughts:
@@ -2375,6 +2583,7 @@ def assistant_approve_digest():
             ),
             encoding="utf-8",
         )
+        _remove_proposed_sprint_record(proposal_id, "rejected")
 
     record_path = _sprint_handoffs_dir() / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H%M%S')}-digest-record.md"
     created_lines = [f"- {item}" for item in created_sprints] or ["- None"]
@@ -2385,7 +2594,7 @@ def assistant_approve_digest():
                 "# Assistant Digest Record",
                 "",
                 f"- created_at: {datetime.now(timezone.utc).isoformat()}",
-                f"- source_count: {len(thoughts)}",
+        f"- source_count: {len(proposal_records)}",
                 f"- created_sprints: {len(created_sprints)}",
                 "",
                 "## Created Sprint Queue Records",
@@ -2404,8 +2613,7 @@ def assistant_approve_digest():
         "created_sprints": created_sprints,
         "created_handoffs": created_handoffs,
         "moved_thoughts": moved_paths,
-        "skipped_selected_thought_ids": skipped_ids,
-        "skipped_selected_thought_paths": skipped_paths,
+        "rejected_proposals": rejected_paths,
         "sprint_queue_url": url_for("sprints"),
         "sprint_detail_urls": [url_for("sprint_detail", sprint_id=item["sprint_id"]) for item in created_sprints],
         "handoff_urls": [url_for("view_file", relative_path=path) for path in created_handoffs],
