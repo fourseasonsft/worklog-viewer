@@ -298,7 +298,19 @@ class WorklogAssistantTests(unittest.TestCase):
         )
         response = self._client().post("/api/assistant/digest-preview", json={})
         self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["digest_preview"]["review_mode"])
         self.assertFalse(list((self.root / "06-sprints/proposed").glob("*.md")))
+
+    def test_digest_message_uses_review_workflow(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-worklog.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Worklog needs queue selection.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Worklog needs queue selection.\n",
+        )
+        response = self._client().post("/api/assistant/message", json={"message": "digest my thought box"})
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertTrue(body["digest_preview"]["review_mode"])
+        self.assertIn("Digest Grouping Review ready", body["assistant_reply"])
 
     def test_cancel_creates_no_proposed_records(self) -> None:
         self._write_thought(

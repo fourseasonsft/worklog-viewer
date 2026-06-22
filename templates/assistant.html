@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="assistant-shell">
-  <section class="card surface-card card-shadow border-0 mb-4">
+  <section class="card surface-card card-shadow border-0 mb-4" id="digest-grouping-review">
     <div class="card-body p-4 p-xl-5 d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-lg-start">
       <div class="hero-copy">
         <div class="eyebrow text-uppercase text-secondary small fw-semibold mb-2">Idea Inventory</div>
@@ -211,6 +211,7 @@
   const selectedCountBadge = document.getElementById('selected-count-badge');
   const selectionStatus = document.getElementById('selection-status');
   const digestResult = document.getElementById('digest-result');
+  const digestGroupingReview = document.getElementById('digest-grouping-review');
   let digestPreview = {{ digest_preview | tojson if digest_preview else 'null' }};
 
   function selectedCheckboxes() {
@@ -283,6 +284,8 @@
         digestSourceTable.appendChild(tr);
       });
     }
+    digestGroupingReview?.classList.remove('d-none');
+    digestGroupingReview?.scrollIntoView({behavior: 'smooth', block: 'start'});
   }
 
   async function finalizeDigest(action) {
@@ -365,10 +368,8 @@
       return;
     }
     renderPreview(data.digest_preview);
-    showDigestResult('Proposed sprint groups created. Review them in Sprint Queue.', 'success', [
-      '<a class="btn btn-sm btn-outline-primary" href="/sprints?status=proposed">Open Sprint Queue</a>',
-    ]);
-    status.textContent = 'Proposed sprint groups created. Review them in Sprint Queue.';
+    showDigestResult('Digest Grouping Review ready. Confirm the grouping before proposed sprint records are created.', 'success');
+    status.textContent = 'Digest Grouping Review ready.';
   }
 
   async function sendMessage(message) {

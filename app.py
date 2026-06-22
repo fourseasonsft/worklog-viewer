@@ -2968,10 +2968,11 @@ def assistant_message():
     if not message:
         return {"error": "message is required"}, 400
     if message.lower() in {"digest my thought box", "digest idea inventory", "digest idea orders", "digest sprint groups"}:
-        preview = _digest_groups_from_items(_thought_box_items(digested_only=False))
+        preview = _preview_thought_items(_thought_box_items(digested_only=False))
+        preview["review_mode"] = True
         return {
             "ok": True,
-            "assistant_reply": "Sprint groups prepared. Review the tables before approving.",
+            "assistant_reply": "Digest Grouping Review ready. Review the tables before creating proposed sprint records.",
             "digest_preview": preview,
             "created_raw_thought": False,
         }
