@@ -101,6 +101,12 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("review-modal-dialog", html)
         self.assertIn("digest-modal-footer", html)
         self.assertIn("data-thought-path", html)
+        self.assertIn(">Inbox<", html)
+        self.assertNotIn("Inbox / New", html)
+        self.assertNotIn("Inbox / Bugs", html)
+        self.assertNotIn("Inbox / Features", html)
+        self.assertNotIn("Inbox / Support", html)
+        self.assertNotIn("Inbox / Closed", html)
         self.assertNotIn("Digest by App/Product", html)
         self.assertNotIn("Proposed Sprint Groups", html)
         self.assertNotIn("Approved Sprint Queue", html)
@@ -138,7 +144,7 @@ class WorklogAssistantTests(unittest.TestCase):
             "# Clean Thought\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: 2026-06-20 10:00 Please tighten the IMS table.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: Please tighten the IMS table.\n",
         )
         item = viewer_app._thought_box_items(digested_only=False)[0]
-        self.assertRegex(item["created_display"], r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}")
+        self.assertRegex(item["created_display"], r"\d{4}-\d{2}-\d{2} \d{1,2}:\d{2} (AM|PM) P[DS]T")
         self.assertNotIn("2026-06-20 10:00", item["display_snippet"])
         self.assertEqual(item["raw_text_full"], "2026-06-20 10:00 Please tighten the IMS table.")
 

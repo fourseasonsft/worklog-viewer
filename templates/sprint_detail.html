@@ -40,8 +40,8 @@
           <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">App/Product</div><div class="fw-semibold">{{ record.app_product }}</div></div></div>
           <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Status</div><div class="fw-semibold">{{ record.status }}</div></div></div>
           <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Scope</div><div class="fw-semibold">{{ record.scope }}</div></div></div>
-          <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Created</div><div class="fw-semibold">{{ record.created_at }}</div></div></div>
-          <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Updated</div><div class="fw-semibold">{{ record.updated_at }}</div></div></div>
+          <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Created</div><div class="fw-semibold">{{ record.created_at | display_timestamp }}</div></div></div>
+          <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Updated</div><div class="fw-semibold">{{ record.updated_at | display_timestamp }}</div></div></div>
         </div>
         {% if record.purpose %}
           <div class="mt-4">

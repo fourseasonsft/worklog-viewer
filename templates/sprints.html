@@ -72,8 +72,8 @@
                 <td><span class="badge {% if record.status_key == 'active' %}text-bg-primary{% elif record.status_key == 'approved' %}text-bg-warning{% elif record.status_key == 'completed' %}text-bg-secondary{% elif record.status_key == 'staged' %}text-bg-info{% elif record.status_key == 'shipped' %}text-bg-success{% else %}text-bg-light border{% endif %}">{{ record.status }}</span></td>
                 <td>{{ record.idea_count }}</td>
                 <td>{{ record.scope }}</td>
-                <td class="text-nowrap">{{ record.created_at }}</td>
-                <td class="text-nowrap">{{ record.updated_at }}</td>
+                <td class="text-nowrap">{{ record.created_at | display_timestamp }}</td>
+                <td class="text-nowrap">{{ record.updated_at | display_timestamp }}</td>
                 <td>
                   <div class="d-flex flex-wrap gap-2">
                     <a class="btn btn-outline-primary btn-sm" href="{{ url_for('sprint_detail', sprint_id=record.id) }}">View</a>

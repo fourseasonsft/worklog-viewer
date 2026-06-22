@@ -79,7 +79,7 @@
                   <td>
                     <input class="form-check-input idea-select" type="checkbox" value="{{ item.thought_id }}" data-thought-id="{{ item.thought_id }}" data-thought-path="{{ item.path }}">
                   </td>
-                  <td class="text-nowrap">{{ item.created_at or item.mtime_display or 'Unknown' }}</td>
+                  <td class="text-nowrap">{{ item.created_at | display_timestamp if item.created_at else item.mtime_display or 'Unknown' }}</td>
                   <td>
                     <div class="fw-semibold">{{ item.title }}</div>
                     <div class="text-secondary small">{{ item.raw_text[:180] if item.raw_text else 'No raw text recorded.' }}</div>

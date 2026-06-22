@@ -594,6 +594,17 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("Handoff Preview", visible)
         self.assertIn("Codex Prompt", visible)
 
+    def test_sidebar_shows_single_inbox_link_and_pacific_timestamps(self) -> None:
+        self._create_sprint_record("approved")
+        html = self._client().get("/sprints").get_data(as_text=True)
+        self.assertIn(">Inbox<", html)
+        self.assertNotIn("Inbox / New", html)
+        self.assertNotIn("Inbox / Bugs", html)
+        self.assertNotIn("Inbox / Features", html)
+        self.assertNotIn("Inbox / Support", html)
+        self.assertNotIn("Inbox / Closed", html)
+        self.assertRegex(html, r"2026-06-20\s+\d{1,2}:\d{2}\s+(AM|PM)\s+P[DS]T")
+
     def test_sprint_queue_idea_count_uses_canonical_source_ideas(self) -> None:
         path = self.root / "06-sprints/approved/sp-20260622000000-queue-count.md"
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -12,6 +12,7 @@ from functools import wraps
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urljoin
+from zoneinfo import ZoneInfo
 
 from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -48,6 +49,7 @@ TOP_DASHBOARD_FILES = [
     {"title": "Where We Left Off", "path": "00-dashboard/where-we-left-off.md", "anchor": "where-we-left-off"},
 ]
 INBOX_FOLDERS = ["new", "bugs", "features", "support"]
+PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 THOUGHT_BOX_DIR = WORKLOG_ROOT / "04-inbox/thought-box"
 SPRINT_HANDOFFS_DIR = WORKLOG_ROOT / "05-sprint-handoffs"
 SPRINTS_ROOT_DIR = WORKLOG_ROOT / "06-sprints"
@@ -193,11 +195,7 @@ def _nav_items() -> list[dict[str, str]]:
                 {"label": "Decisions", "endpoint": "decisions"},
                 {"label": "Release Notes", "endpoint": "release_notes"},
                 {"label": "Ideas", "endpoint": "ideas"},
-                {"label": "Inbox / New", "endpoint": "inbox_new"},
-                {"label": "Inbox / Bugs", "endpoint": "inbox_bugs"},
-                {"label": "Inbox / Features", "endpoint": "inbox_features"},
-                {"label": "Inbox / Support", "endpoint": "inbox_support"},
-                {"label": "Inbox / Closed", "endpoint": "inbox_closed"},
+                {"label": "Inbox", "endpoint": "inbox"},
             ],
         },
     ]
@@ -226,15 +224,35 @@ def _file_mtime(path: Path) -> float:
 
 def _format_file_timestamp(path: Path) -> str:
     try:
-        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%d")
+        return _format_pacific_timestamp(datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc))
     except OSError:
         return "Unknown"
 
 
 def _format_local_timestamp(dt: datetime | None = None) -> str:
     dt = dt or datetime.now(timezone.utc)
-    local_dt = dt.astimezone()
-    return local_dt.strftime("%Y-%m-%d %H:%M")
+    return _format_pacific_timestamp(dt)
+
+
+def _format_pacific_timestamp(value: datetime | str | None) -> str:
+    if value is None:
+        return "Unknown"
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return "Unknown"
+        normalized = text.replace("Z", "+00:00")
+        try:
+            value = datetime.fromisoformat(normalized)
+        except ValueError:
+            return text
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    local_dt = value.astimezone(PACIFIC_TZ)
+    return local_dt.strftime("%Y-%m-%d %I:%M %p %Z").replace(" 0", " ")
+
+
+app.jinja_env.filters["display_timestamp"] = _format_pacific_timestamp
 
 
 def _extract_section_text(markdown_text: str, heading: str) -> str:
@@ -2927,6 +2945,7 @@ def inject_globals() -> dict[str, object]:
         "now_utc": None,
         "is_authenticated": _is_authenticated(),
         "is_super_admin": _is_super_admin(),
+        "display_timestamp": _format_pacific_timestamp,
     }
 
 
