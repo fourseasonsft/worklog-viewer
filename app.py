@@ -1117,6 +1117,7 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
         "proposed_work": proposed_work,
         "handoff_path": handoff_path,
         "handoff_markdown": handoff_markdown,
+        "handoff_md": _extract_section_text(text, "Handoff Preview"),
         "raw_html": _render_markdown(text),
         "starting_prompt": meta.get("starting_prompt") or _extract_section_text(text, "Codex/ChatGPT Starting Prompt"),
         "completion_requirement": meta.get("completion requirement") or _extract_section_text(text, "Completion Requirement"),
@@ -1713,6 +1714,19 @@ def _call_openai_digest(items: list[dict[str, str]]) -> dict[str, object] | None
 def _infer_thought(raw_text: str) -> dict[str, str]:
     text = raw_text.lower()
     app_guess = ""
+    worklog_markers = [
+        "worklog",
+        "idea inventory",
+        "sprint queue",
+        "inbox",
+        "proposed sprint group",
+        "proposed sprint groups",
+        "handoff",
+        "dashboard",
+        "active idea inventory",
+    ]
+    if any(marker in text for marker in worklog_markers):
+        app_guess = "Worklog"
     app_labels = {
         "ims": "IMS",
         "dispatch": "Dispatch",
@@ -1721,10 +1735,9 @@ def _infer_thought(raw_text: str) -> dict[str, str]:
         "unity": "Unity",
         "parking": "Parking",
         "hiring": "Hiring",
-        "worklog": "Worklog",
     }
     for candidate, label in app_labels.items():
-        if candidate in text:
+        if candidate in text and not app_guess:
             app_guess = label
             break
     type_guess = ""
@@ -1747,7 +1760,35 @@ def _infer_thought(raw_text: str) -> dict[str, str]:
 
 def _sprint_group_name(app_name: str, thoughts: list[dict[str, str]]) -> str:
     keywords = " ".join(thought.get("raw_text", "") for thought in thoughts).lower()
-    if any(token in keywords for token in ["ui", "layout", "design", "copy", "dashboard"]):
+    worklog_focus = app_name == "Worklog" and any(
+        token in keywords
+        for token in [
+            "ui",
+            "layout",
+            "design",
+            "copy",
+            "dashboard",
+            "idea inventory",
+            "sprint queue",
+            "inbox",
+            "navigation",
+            "menu",
+            "selection",
+            "date",
+            "time",
+            "workflow",
+            "hand-off",
+            "handoff",
+        ]
+    )
+    if worklog_focus:
+        if any(token in keywords for token in ["navigation", "menu", "inbox"]):
+            focus = "Navigation Simplification"
+        elif any(token in keywords for token in ["queue", "selection", "dashboard", "idea inventory"]):
+            focus = "Idea Inventory UI Cleanup"
+        else:
+            focus = "Sprint Queue UX Cleanup"
+    elif any(token in keywords for token in ["ui", "layout", "design", "copy", "dashboard"]):
         focus = "UI cleanup"
     elif any(token in keywords for token in ["import", "ingest", "capture", "webhook"]):
         focus = "intake flow"
@@ -1935,6 +1976,11 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
                 if cluster_thoughts and cluster_thoughts[0].get("normalized_summary")
                 else "Review the source ideas and choose the smallest focused implementation slice."
             )
+            purpose = (
+                "Clean up the Worklog Idea Inventory and navigation experience by improving row selection, date formatting, and menu simplicity."
+                if app_name == "Worklog"
+                else f"Turn {app_name} ideas into a focused {cluster_name} sprint."
+            )
             group = {
                 "app_product": app_name,
                 "sprint_code": sprint_code,
@@ -1947,7 +1993,7 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
                 "source_thoughts": [thought["path"] for thought in cluster_thoughts],
                 "proposed_work": [thought.get("normalized_summary") or thought.get("display_snippet") or thought.get("raw_text_full") for thought in cluster_thoughts if thought.get("raw_text_full")],
                 "scope": _sprint_group_scope(cluster_thoughts),
-                "purpose": f"Simplify Worklog reporting and queue workflows by reducing category clutter, improving filters, and making Idea Inventory easier to scan." if app_name == "Worklog" else f"Turn {app_name} ideas into a focused {cluster_name} sprint.",
+                "purpose": purpose,
                 "starting_prompt": "",
                 "thoughts": cluster_thoughts,
             }
@@ -1972,8 +2018,18 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
                 "source_thoughts": [thought["path"]],
                 "proposed_work": [thought.get("normalized_summary") or thought.get("raw_text_full")] if thought.get("raw_text_full") else [],
                 "scope": "Small",
-                "purpose": f"Turn {thought['ai_inferred_app']} ideas into a focused sprint.",
-                "starting_prompt": _build_codex_prompt(thought["ai_inferred_app"], sprint_name, [thought], sprint_code, f"Turn {thought['ai_inferred_app']} ideas into a focused sprint."),
+                "purpose": "Clean up the Worklog Idea Inventory and navigation experience by improving row selection, date formatting, and menu simplicity."
+                if thought["ai_inferred_app"] == "Worklog"
+                else f"Turn {thought['ai_inferred_app']} ideas into a focused sprint.",
+                "starting_prompt": _build_codex_prompt(
+                    thought["ai_inferred_app"],
+                    sprint_name,
+                    [thought],
+                    sprint_code,
+                    "Clean up the Worklog Idea Inventory and navigation experience by improving row selection, date formatting, and menu simplicity."
+                    if thought["ai_inferred_app"] == "Worklog"
+                    else f"Turn {thought['ai_inferred_app']} ideas into a focused sprint.",
+                ),
                 "thoughts": [thought],
             }
         )
@@ -2007,6 +2063,7 @@ def _proposal_view_from_group(group: dict[str, object]) -> dict[str, object]:
         "recommended_first_step": group.get("recommended_first_step") or "",
         "handoff_md": group.get("handoff_md") or "",
         "path": group.get("path") or "",
+        "purpose": group.get("purpose") or "",
     }
 
 

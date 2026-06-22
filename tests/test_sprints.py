@@ -180,6 +180,23 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("Approve", html)
         self.assertIn("Reject", html)
 
+    def test_proposed_detail_renders_sprint_style_layout(self) -> None:
+        path = self._create_proposed_sprint_record(title="Worklog Idea Inventory UI Cleanup", app_product="Worklog")
+        record = viewer_app._sprint_records()[0]
+        html = self._client().get(f"/sprints/{record['id']}").get_data(as_text=True)
+        self.assertIn("Summary", html)
+        self.assertIn("Sprint Code", html)
+        self.assertIn("App/Product", html)
+        self.assertIn("Source Ideas", html)
+        self.assertIn("Proposed Work", html)
+        self.assertIn("Handoff Preview", html)
+        self.assertIn("Approve", html)
+        self.assertIn("Reject", html)
+        self.assertIn("Back to Sprint Queue", html)
+        self.assertIn("<details", html)
+        self.assertIn("Debug metadata", html)
+        self.assertNotIn("proposal_id:", html.split("Debug metadata")[0])
+
     def test_generated_sprint_code_is_unique(self) -> None:
         self._create_sprint_record("approved", app_product="IMS", title="IMS Sprint 1")
         code = viewer_app._generate_sprint_code("IMS")
@@ -211,7 +228,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
         html = self._client().get("/sprints/sp-20260620120000-completed").get_data(as_text=True)
         self.assertIn("Sprint Queue Record", html)
         self.assertIn("Sprint Code", html)
-        self.assertIn("Generated Handoff", html)
+        self.assertIn("Handoff Preview", html)
         self.assertIn("Copy Prompt", html)
         self.assertIn("Copy Handoff", html)
         self.assertIn("Mark Staged", html)

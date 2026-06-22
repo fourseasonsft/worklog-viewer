@@ -4,9 +4,17 @@
   <div class="card-body p-4 p-xl-5">
     <div class="d-flex flex-column flex-xl-row justify-content-between gap-4 align-items-xl-start">
       <div>
-        <div class="eyebrow text-uppercase text-secondary small fw-semibold mb-2">Sprint Queue Record</div>
+        <div class="eyebrow text-uppercase text-secondary small fw-semibold mb-2">
+          {% if record.status_key == 'proposed' %}Proposed Sprint Group{% else %}Sprint Queue Record{% endif %}
+        </div>
         <h1 class="h2 mb-2">{{ record.title }}</h1>
-        <p class="text-secondary mb-0">Traceability from raw thought to sprint queue to handoff is preserved here.</p>
+        <p class="text-secondary mb-0">
+          {% if record.status_key == 'proposed' %}
+            Review the proposed sprint details before approving or rejecting the group.
+          {% else %}
+            Traceability from raw thought to sprint queue to handoff is preserved here.
+          {% endif %}
+        </p>
       </div>
       <div class="d-flex flex-wrap gap-2">
         <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('sprints') }}">Back to Sprint Queue</a>
@@ -29,15 +37,37 @@
         <div class="text-uppercase text-secondary small fw-semibold mb-2">Summary</div>
         <div class="row g-3">
           <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Sprint Code</div><div class="fw-semibold">{{ record.sprint_code }}</div></div></div>
-          <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Sprint Name</div><div class="fw-semibold">{{ record.title }}</div></div></div>
-          <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">App</div><div class="fw-semibold">{{ record.app_product }}</div></div></div>
+          <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">App/Product</div><div class="fw-semibold">{{ record.app_product }}</div></div></div>
           <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Status</div><div class="fw-semibold">{{ record.status }}</div></div></div>
           <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Scope</div><div class="fw-semibold">{{ record.scope }}</div></div></div>
           <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Created</div><div class="fw-semibold">{{ record.created_at }}</div></div></div>
           <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Updated</div><div class="fw-semibold">{{ record.updated_at }}</div></div></div>
         </div>
-        <div class="d-flex flex-wrap gap-2 mt-4">
-          {% if record.status_key == 'completed' %}
+        {% if record.purpose %}
+          <div class="mt-4">
+            <div class="text-uppercase text-secondary small fw-semibold mb-2">Purpose</div>
+            <p class="mb-0">{{ record.purpose }}</p>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-xl-6">
+    <div class="card surface-card card-shadow border-0 h-100">
+      <div class="card-body p-4 p-xl-5">
+        <div class="text-uppercase text-secondary small fw-semibold mb-2">Actions</div>
+        <div class="d-flex flex-wrap gap-2">
+          {% if record.status_key == 'proposed' %}
+            <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+              <input type="hidden" name="action" value="approve">
+              <button class="btn btn-primary" type="submit">Approve</button>
+            </form>
+            <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+              <input type="hidden" name="action" value="reject">
+              <button class="btn btn-outline-danger" type="submit">Reject</button>
+            </form>
+            <a class="btn btn-outline-secondary" href="{{ url_for('sprints') }}">Back to Sprint Queue</a>
+          {% elif record.status_key == 'completed' %}
             <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
               <input type="hidden" name="action" value="stage">
               <button class="btn btn-outline-primary" type="submit">Mark Staged</button>
@@ -48,31 +78,6 @@
               <button class="btn btn-outline-primary" type="submit">Mark Shipped</button>
             </form>
           {% endif %}
-        </div>
-      </div>
-    </div>
-  </div>
-  <div class="col-12 col-xl-6">
-    <div class="card surface-card card-shadow border-0 h-100">
-      <div class="card-body p-4 p-xl-5">
-        <div class="text-uppercase text-secondary small fw-semibold mb-2">Sprint History</div>
-        <div class="table-responsive">
-          <table class="table inbox-table align-middle mb-0">
-            <thead>
-              <tr>
-                <th>Status</th>
-                <th>Updated</th>
-                <th>Trace</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>{% if record.status_key == 'staged' %}Staged{% else %}{{ record.status }}{% endif %}</td>
-                <td>{{ record.updated_at }}</td>
-                <td><a href="{{ url_for('view_file', relative_path=record.path) }}">Sprint record</a></td>
-              </tr>
-            </tbody>
-          </table>
         </div>
       </div>
     </div>
@@ -125,8 +130,8 @@
 
         <div class="row g-4">
           <div class="col-12 col-xl-6">
-            <div class="text-uppercase text-secondary small fw-semibold mb-2">Generated Handoff</div>
-            <pre class="assistant-pre" id="handoff-copy">{{ record.handoff_markdown or record.raw_html }}</pre>
+            <div class="text-uppercase text-secondary small fw-semibold mb-2">Handoff Preview</div>
+            <pre class="assistant-pre" id="handoff-copy">{{ record.handoff_md or record.handoff_markdown or record.raw_html }}</pre>
           </div>
           <div class="col-12 col-xl-6">
             <div class="text-uppercase text-secondary small fw-semibold mb-2">Codex Prompt</div>
@@ -139,13 +144,12 @@
           </div>
         </div>
 
-        <div class="mt-4 d-flex flex-wrap gap-2">
-          <a class="btn btn-outline-secondary" href="{{ url_for('sprints') }}">View Sprint Queue</a>
-          {% if record.handoff_path %}
-            <a class="btn btn-outline-primary" href="{{ url_for('view_file', relative_path=record.handoff_path) }}">View Handoff</a>
-          {% endif %}
-        </div>
-
+        <details class="mt-4">
+          <summary class="text-uppercase text-secondary small fw-semibold">Debug metadata</summary>
+          <div class="mt-3 p-3 rounded border bg-light">
+            <pre class="assistant-pre mb-0">{{ record.raw_html }}</pre>
+          </div>
+        </details>
       </div>
     </div>
   </div>

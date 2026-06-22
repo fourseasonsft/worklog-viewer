@@ -203,6 +203,24 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertTrue(any(group["app_product"] == "IMS" for group in preview["sprint_groups"]))
         self.assertTrue(all(group.get("sprint_code") for group in preview["sprint_groups"]))
 
+    def test_worklog_keywords_classify_as_worklog(self) -> None:
+        inferred = viewer_app._infer_thought("Worklog idea inventory sprint queue handoff dashboard cleanup")
+        self.assertEqual(inferred["ai_inferred_app"], "Worklog")
+
+    def test_worklog_sprint_groups_get_specific_names_and_purpose(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-worklog-ui.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Make idea rows click to select. Use short date and PST time on ideas inventory date/time column. I don't want to see inbox/new/bugs/features/support/closed on the menu.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Worklog UI cleanup.\n",
+        )
+        preview = self._client().post("/api/assistant/digest-preview", json={}).get_json()["digest_preview"]
+        group = next(item for item in preview["sprint_groups"] if item["app_product"] == "Worklog")
+        self.assertNotIn("Other", group["sprint_group_name"])
+        self.assertIn("Worklog", group["sprint_group_name"])
+        self.assertEqual(
+            group["purpose"],
+            "Clean up the Worklog Idea Inventory and navigation experience by improving row selection, date formatting, and menu simplicity.",
+        )
+
     def test_digest_output_renders_as_tables(self) -> None:
         self._write_thought(
             "2026-06-20-100000-worklog-ui.md",
