@@ -208,6 +208,8 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertEqual(preview["selected_idea_count"], 2)
         self.assertEqual(len(preview["selected_thought_ids"]), 2)
         self.assertEqual(len(preview["source_thought_paths"]), 2)
+        self.assertGreaterEqual(len(preview["sprint_groups"]), 1)
+        self.assertGreaterEqual(len(preview["active_items"]), 2)
 
     def test_digest_all_includes_all_active_ideas(self) -> None:
         self._write_thought(

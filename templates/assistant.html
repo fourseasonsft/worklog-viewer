@@ -309,8 +309,16 @@
     clearDigestModalResult();
     previewEmpty.classList.add('d-none');
     previewBody.classList.remove('d-none');
+    const sourceItems = (data.active_items && data.active_items.length)
+      ? data.active_items
+      : (data.sprint_groups || []).flatMap((group) => group.thoughts || []);
+    console.debug('digest-preview payload received', {
+      source_idea_count: sourceItems.length,
+      suggested_group_count: (data.sprint_groups || []).length,
+      selected_idea_count: data.selected_idea_count || data.source_idea_count || 0,
+    });
     if (digestSelectedCount) {
-      digestSelectedCount.textContent = data.selected_idea_count || data.source_idea_count || (data.active_items || []).length || 0;
+      digestSelectedCount.textContent = data.selected_idea_count || data.source_idea_count || sourceItems.length || 0;
     }
     if (digestSprintTable) {
       digestSprintTable.innerHTML = '';
@@ -329,7 +337,7 @@
     }
     if (digestSourceTable) {
       digestSourceTable.innerHTML = '';
-      (data.active_items || []).forEach((item) => {
+      sourceItems.forEach((item) => {
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td class="text-nowrap">${item.created_display || item.created_at || item.mtime_display || 'Unknown'}</td>

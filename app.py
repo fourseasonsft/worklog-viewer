@@ -3022,6 +3022,11 @@ def assistant_digest_preview():
         selected_only,
     )
     preview = _preview_thought_items(thoughts)
+    app.logger.info(
+        "digest-preview payload source_ideas=%s suggested_groups=%s",
+        len(preview.get("active_items") or []),
+        len(preview.get("sprint_groups") or []),
+    )
     preview["review_mode"] = True
     preview["selection_mode"] = "selected" if selected_only and (thought_ids or thought_paths) else "all"
     preview["selected_thought_ids"] = [str(item) for item in thought_ids]
