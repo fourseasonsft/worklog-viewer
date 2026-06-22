@@ -505,7 +505,10 @@ class WorklogSprintQueueTests(unittest.TestCase):
                     "- test",
                     "",
                     "## Handoff Preview",
-                    "# Sprint Handoff Preview",
+                    "# Sprint Handoff Preview\n\n## Source Ideas\n- Test123.\n\n## Proposed Work\n- Test123.\n\n## Codex/ChatGPT Starting Prompt\nTest123.",
+                    "",
+                    "## Codex/ChatGPT Starting Prompt",
+                    "Test123.",
                     "",
                 ]
             ),
@@ -542,6 +545,54 @@ class WorklogSprintQueueTests(unittest.TestCase):
         thoughts = self._client().get("/api/assistant/thoughts").get_json()["thoughts"]
         self.assertFalse(any(thought["raw_text_full"] == "IMS needs break bulk handling." for thought in thoughts))
         self.assertFalse(any(thought["raw_text_full"] == "Worklog needs queue selection." for thought in thoughts))
+
+    def test_proposed_sprint_detail_uses_canonical_source_lists(self) -> None:
+        path = self.root / "06-sprints/proposed/pr-20260622000000-legacy-dup.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "\n".join(
+                [
+                    "# Proposed Sprint Group: Legacy Dup",
+                    "",
+                    "- proposal_id: pr-20260622000000-001",
+                    "- intended_sprint_code: WL-SPRINT-20260622-999",
+                    "- sprint_group_name: Legacy Dup",
+                    "- app_product: Worklog",
+                    "- scope: Small",
+                    "- status: proposed",
+                    "- created_at: 2026-06-22T20:00:00Z",
+                    "- updated_at: 2026-06-22T20:00:00Z",
+                    "- source_thought_paths: 04-inbox/thought-box/test123.md",
+                    "",
+                    "## Source Ideas",
+                    "- Test123.",
+                    "",
+                    "## Source Idea Summaries",
+                    "- Test123.",
+                    "",
+                    "## Proposed Work",
+                    "- Test123.",
+                    "",
+                    "## Handoff Preview",
+                    "# Sprint Handoff Preview",
+                    "",
+                    "## Codex/ChatGPT Starting Prompt",
+                    "Test123.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        record = next(item for item in viewer_app._proposed_sprint_records() if item["proposal_id"] == "pr-20260622000000-001")
+        self.assertIsNotNone(record)
+        with viewer_app.app.test_request_context():
+            html = viewer_app.render_template("sprint_detail.html", record=record)
+        visible = html.split("Debug metadata")[0]
+        self.assertEqual(visible.count("Test123."), 2)
+        self.assertIn("Source Ideas", visible)
+        self.assertIn("Proposed Work", visible)
+        self.assertIn("Handoff Preview", visible)
+        self.assertIn("Codex Prompt", visible)
 
     def test_confirmation_routes_require_post(self) -> None:
         self._create_sprint_record("approved")

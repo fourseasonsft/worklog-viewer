@@ -1003,6 +1003,21 @@ def _source_idea_strings(thoughts: list[dict[str, object]]) -> list[str]:
     return items
 
 
+def _dedupe_text_list(items: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        text = str(item).strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(text)
+    return deduped
+
+
 def _restore_source_ideas_for_record(record: dict[str, object], restore_reason: str = "rescinded") -> tuple[list[str], list[str], dict[str, int]]:
     restored: list[str] = []
     warnings: list[str] = []
@@ -1132,6 +1147,7 @@ def _append_sprint_audit_note(path: Path, note_lines: list[str]) -> None:
 def _parse_proposed_sprint_record(path: Path) -> dict[str, object]:
     text = path.read_text(encoding="utf-8")
     meta = _parse_key_value_metadata(text)
+    sprint_id = meta.get("sprint_id") or meta.get("proposal_id") or path.stem.split("-", 1)[0]
     source_ideas = []
     proposed_work = []
     current_section = None
@@ -1146,6 +1162,7 @@ def _parse_proposed_sprint_record(path: Path) -> dict[str, object]:
         elif current_section == "proposed work" and line.startswith("- "):
             proposed_work.append(line[2:].strip())
     return {
+        "id": sprint_id,
         "proposal_id": meta.get("proposal_id") or path.stem.split("-", 1)[0],
         "intended_sprint_code": meta.get("intended_sprint_code") or meta.get("sprint_code") or "",
         "sprint_group_name": meta.get("sprint_group_name") or path.stem.split("-", 1)[1].replace("-", " ").title(),
@@ -1158,8 +1175,11 @@ def _parse_proposed_sprint_record(path: Path) -> dict[str, object]:
         "source_thought_paths": [item.strip() for item in (meta.get("source_thought_paths") or "").split(",") if item.strip()],
         "proposed_source_thoughts": [item.strip() for item in (meta.get("proposed_source_thoughts") or "").split(",") if item.strip()],
         "source_created_ats": [item.strip() for item in (meta.get("source_created_ats") or "").split(",") if item.strip()],
-        "source_ideas": source_ideas,
-        "proposed_work": proposed_work,
+        "source_ideas": _dedupe_text_list(source_ideas),
+        "source_idea_summaries": _dedupe_text_list(source_ideas),
+        "canonical_source_ideas": _dedupe_text_list(source_ideas),
+        "proposed_work": _dedupe_text_list(proposed_work),
+        "canonical_proposed_work": _dedupe_text_list(proposed_work),
         "recommended_first_step": meta.get("recommended_first_step") or _extract_section_text(text, "Recommended First Step"),
         "handoff_md": _extract_section_text(text, "Handoff Preview"),
         "path": str(path.relative_to(WORKLOG_ROOT)),
@@ -1498,12 +1518,14 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
         "created_at": meta.get("created_at") or _format_file_timestamp(path),
         "updated_at": meta.get("updated_at") or _format_file_timestamp(path),
         "path": str(path.relative_to(WORKLOG_ROOT)),
-        "source_thoughts": source_thoughts,
-        "source_ideas": source_ideas,
+        "source_thoughts": _dedupe_text_list(source_thoughts),
+        "source_ideas": _dedupe_text_list(source_ideas),
         "source_thought_paths": source_thought_paths,
-        "source_idea_summaries": source_idea_summaries or source_ideas or source_thoughts,
+        "source_idea_summaries": _dedupe_text_list(source_idea_summaries or source_ideas or source_thoughts),
+        "canonical_source_ideas": _dedupe_text_list(source_idea_summaries or source_ideas or source_thoughts),
         "digested_source_thoughts": digested_source_thoughts,
-        "proposed_work": proposed_work,
+        "proposed_work": _dedupe_text_list(proposed_work or source_idea_summaries or source_ideas or source_thoughts),
+        "canonical_proposed_work": _dedupe_text_list(proposed_work or source_idea_summaries or source_ideas or source_thoughts),
         "handoff_path": handoff_path,
         "handoff_markdown": handoff_markdown,
         "handoff_md": _extract_section_text(text, "Handoff Preview"),

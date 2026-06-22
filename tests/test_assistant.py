@@ -534,6 +534,45 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertEqual(handoff.split("## Proposed Work")[1].split("## Suggested Scope")[0].count("Test123."), 1)
         self.assertEqual(handoff.split("## Codex/ChatGPT Starting Prompt")[1].count("Test123."), 1)
 
+    def test_proposed_parser_dedupes_legacy_duplicate_fields(self) -> None:
+        path = self.root / "06-sprints/proposed/pr-20260622000000-legacy-dup.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "\n".join(
+                [
+                    "# Proposed Sprint Group: Legacy Dup",
+                    "",
+                    "- proposal_id: pr-20260622000000-001",
+                    "- intended_sprint_code: WL-SPRINT-20260622-999",
+                    "- sprint_group_name: Legacy Dup",
+                    "- app_product: Worklog",
+                    "- scope: Small",
+                    "- status: proposed",
+                    "- created_at: 2026-06-22T20:00:00Z",
+                    "- updated_at: 2026-06-22T20:00:00Z",
+                    "- source_thought_paths: 04-inbox/thought-box/test123.md",
+                    "",
+                    "## Source Ideas",
+                    "- Test123.",
+                    "",
+                    "## Source Idea Summaries",
+                    "- Test123.",
+                    "",
+                    "## Proposed Work",
+                    "- Test123.",
+                    "",
+                    "## Handoff Preview",
+                    "# Sprint Handoff Preview",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        record = viewer_app._parse_proposed_sprint_record(path)
+        self.assertEqual(record["canonical_source_ideas"], ["Test123."])
+        self.assertEqual(record["source_ideas"], ["Test123."])
+        self.assertEqual(record["proposed_work"], ["Test123."])
+
     def test_no_thoughts_empty_state_works(self) -> None:
         html = self._client().get("/assistant").get_data(as_text=True)
         self.assertIn("No active raw ideas yet.", html)
