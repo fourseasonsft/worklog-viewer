@@ -523,6 +523,25 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("Codex/ChatGPT Starting Prompt", text)
         self.assertIn("Completion Requirement", text)
         self.assertIn("Sprint Code:", text)
+        self.assertNotIn("No handoff content found", text)
+        self.assertIn("Needs a calmer inbox queue.", text)
+
+    def test_proposed_handoff_file_is_complete_on_first_write(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-worklog.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Worklog needs a calmer inbox queue.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Worklog needs a calmer inbox queue.\n",
+        )
+        preview = self._client().post("/api/assistant/digest-preview", json={}).get_json()["digest_preview"]
+        response = self._client().post("/api/assistant/create-proposed-sprints", json={"digest_preview": preview, "action": "accept_suggested"})
+        self.assertEqual(response.status_code, 200)
+        proposal_file = next(path for path in (self.root / "06-sprints/proposed").glob("*.md") if "# Proposed Sprint Group:" in path.read_text(encoding="utf-8"))
+        text = proposal_file.read_text(encoding="utf-8")
+        self.assertIn("# Proposed Sprint Group:", text)
+        self.assertIn("## Handoff Preview", text)
+        self.assertIn("## Source Ideas", text)
+        self.assertIn("## Proposed Work", text)
+        self.assertIn("## Codex/ChatGPT Starting Prompt", text)
+        self.assertNotIn("No handoff content found. Regenerate handoff.", text)
 
     def test_proposal_builder_dedupes_duplicate_sources(self) -> None:
         thought = {

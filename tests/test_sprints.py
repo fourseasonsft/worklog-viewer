@@ -618,7 +618,10 @@ class WorklogSprintQueueTests(unittest.TestCase):
         with viewer_app.app.test_request_context():
             html = viewer_app.render_template("sprint_detail.html", record=record)
         visible = html.split("Debug metadata")[0]
-        self.assertEqual(visible.count("Test123."), 2)
+        source_section = visible.split("Source Ideas")[1].split("Proposed Work")[0]
+        proposed_section = visible.split("Proposed Work")[1].split("Handoff Preview")[0]
+        self.assertEqual(source_section.count("Test123."), 1)
+        self.assertEqual(proposed_section.count("Test123."), 1)
         self.assertIn("Source Ideas", visible)
         self.assertIn("Proposed Work", visible)
         self.assertIn("Handoff Preview", visible)
@@ -745,6 +748,28 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("Completion Requirement", text)
         self.assertIn("Source Ideas", text)
         self.assertIn("Sprint Code", text)
+        self.assertIn("Codex/ChatGPT Starting Prompt", text)
+        self.assertNotIn("No handoff content found. Regenerate handoff.", text)
+
+    def test_initial_and_regenerated_handoffs_match(self) -> None:
+        preview = viewer_app._digest_preview(viewer_app._thought_box_items(digested_only=False))
+        client = self._client()
+        created = client.post("/api/assistant/create-proposed-sprints", json={"digest_preview": preview, "action": "accept_suggested"})
+        self.assertEqual(created.status_code, 200)
+        proposal = viewer_app._proposed_sprint_records()[0]
+        approved = client.post(f"/sprints/{proposal['id']}/action", data={"action": "approve"}, follow_redirects=True)
+        self.assertEqual(approved.status_code, 200)
+        sprint_record = viewer_app._sprint_records()[0]
+        handoff_path = self.root / sprint_record["handoff_path"]
+        initial_text = handoff_path.read_text(encoding="utf-8")
+        regenerated = client.post(f"/sprints/{sprint_record['id']}/action", data={"action": "regenerate_handoff"}, follow_redirects=True)
+        self.assertEqual(regenerated.status_code, 200)
+        regenerated_text = handoff_path.read_text(encoding="utf-8")
+        self.assertEqual(initial_text, regenerated_text)
+        self.assertIn("## Source Ideas", regenerated_text)
+        self.assertIn("## Proposed Work", regenerated_text)
+        self.assertIn("## Codex/ChatGPT Starting Prompt", regenerated_text)
+        self.assertNotIn("No handoff content found. Regenerate handoff.", regenerated_text)
 
     def test_regenerate_handoff_repairs_source_sections(self) -> None:
         record_path = self._create_sprint_record("approved")

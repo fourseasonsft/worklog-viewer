@@ -827,9 +827,8 @@ def _write_proposed_sprint_record(group: dict[str, object]) -> Path:
     if not proposed_work:
         proposed_work = list(dict.fromkeys(source_idea_summaries or source_thoughts))
     proposed_source_thoughts = [str(item) for item in group.get("proposed_source_thoughts", []) if str(item).strip()]
-    handoff_md = str(group.get("handoff_md") or "").strip()
-    if handoff_md:
-        handoff_md = "```markdown\n" + handoff_md + "\n```"
+    handoff_md = _build_handoff_markdown_from_record({**group, "intended_sprint_code": intended_sprint_code}, group.get("thoughts") or [])
+    handoff_md = "```markdown\n" + handoff_md + "\n```"
     text = "\n".join(
         [
             f"# Proposed Sprint Group: {title}",
@@ -842,6 +841,8 @@ def _write_proposed_sprint_record(group: dict[str, object]) -> Path:
             f"- status: proposed",
             f"- created_at: {group.get('created_at') or datetime.now(timezone.utc).isoformat()}",
             f"- updated_at: {datetime.now(timezone.utc).isoformat()}",
+            f"- purpose: {group.get('purpose') or ''}",
+            f"- starting_prompt: {group.get('starting_prompt') or ''}",
             f"- source_thought_ids: {', '.join(str(item) for item in group.get('source_thought_ids', []))}",
             f"- source_thought_paths: {', '.join(str(item) for item in group.get('source_thought_paths', []))}",
             f"- proposed_source_thoughts: {', '.join(proposed_source_thoughts)}",
@@ -1274,6 +1275,8 @@ def _parse_proposed_sprint_record(path: Path) -> dict[str, object]:
         "idea_count": _canonical_idea_count(canonical_source_ideas=_dedupe_text_list(source_ideas)),
         "proposed_work": _dedupe_text_list(proposed_work),
         "canonical_proposed_work": _dedupe_text_list(proposed_work),
+        "purpose": meta.get("purpose") or _extract_section_text(text, "Purpose"),
+        "starting_prompt": meta.get("starting_prompt") or _extract_section_text(text, "Codex/ChatGPT Starting Prompt"),
         "recommended_first_step": meta.get("recommended_first_step") or _extract_section_text(text, "Recommended First Step"),
         "handoff_md": _extract_section_text(text, "Handoff Preview"),
         "path": str(path.relative_to(WORKLOG_ROOT)),
@@ -1507,6 +1510,7 @@ def _write_sprint_record(group: dict[str, object], status: str = "approved") -> 
             f"- sprint_id: {sprint_id}",
             f"- sprint_code: {sprint_code}",
             f"- app_product: {app_product}",
+            f"- sprint_group_name: {title}",
             f"- status: {status}",
             f"- scope: {group.get('scope') or 'Small'}",
             f"- idea_count: {_canonical_idea_count(canonical_source_ideas=canonical_source_ideas or source_idea_summaries or source_thoughts)}",
@@ -1605,6 +1609,7 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
         "sprint_code": meta.get("intended_sprint_code") or meta.get("sprint_code") or sprint_id.upper(),
         "intended_sprint_code": meta.get("intended_sprint_code") or meta.get("sprint_code") or sprint_id.upper(),
         "title": title,
+        "sprint_group_name": meta.get("sprint_group_name") or title,
         "app_product": app_product,
         "status": status.title(),
         "status_key": status.lower(),
@@ -1756,7 +1761,7 @@ def _regenerate_sprint_handoff_record(record: dict[str, object]) -> tuple[dict[s
         "purpose": record.get("purpose") or (f"Turn {record.get('app_product') or 'Worklog'} ideas into a focused sprint-sized implementation conversation."),
         "recommended_first_step": record.get("recommended_first_step") or (thoughts[0].get("normalized_summary") if thoughts else "Review the source ideas and outline the smallest implementation slice."),
     }
-    handoff_markdown = _build_handoff_markdown(str(sprint_group.get("app_product") or "Worklog"), str(sprint_group.get("title") or record.get("title") or "Sprint"), thoughts, sprint_group)
+    handoff_markdown = _build_handoff_markdown_from_record(sprint_group, thoughts)
     handoff_path_value = str(record.get("handoff_path") or "").strip()
     handoff_path = WORKLOG_ROOT / handoff_path_value if handoff_path_value else Path()
     if not handoff_path_value or not handoff_path.exists():
@@ -1775,15 +1780,7 @@ def _write_sprint_handoff_file(group: dict[str, object]) -> Path:
     _sprint_handoffs_dir().mkdir(parents=True, exist_ok=True)
     title = str(group.get("sprint_group_name") or "Sprint Handoff")
     path = _sprint_handoffs_dir() / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H%M%S')}-{_slugify_title(title)}.md"
-    path.write_text(
-        _build_handoff_markdown(
-            str(group.get("app_product") or "Worklog"),
-            title,
-            group.get("thoughts") or [],
-            group,
-        ),
-        encoding="utf-8",
-    )
+    path.write_text(_build_handoff_markdown_from_record(group, group.get("thoughts") or []), encoding="utf-8")
     return path
 
 
@@ -2503,32 +2500,57 @@ def _build_codex_prompt(app_name: str, sprint_name: str, thoughts: list[dict[str
     )
 
 
-def _build_handoff_markdown(app_name: str, sprint_name: str, thoughts: list[dict[str, str]], group: dict[str, object]) -> str:
-    canonical_thoughts = _canonicalize_source_thoughts([thought for thought in thoughts if isinstance(thought, dict)])
-    purpose = group.get("purpose") or f"Turn {app_name} raw ideas into a focused sprint-sized implementation conversation."
-    sprint_code = str(group.get("intended_sprint_code") or group.get("sprint_code") or (canonical_thoughts[0].get("sprint_code") if canonical_thoughts else "") or "TBD").strip()
-    source_ideas_source = canonical_thoughts or group.get("source_idea_summaries") or group.get("source_ideas") or []
-    if not source_ideas_source and group.get("source_thought_paths"):
-        source_ideas_source = [Path(str(path)).stem.replace("-", " ").title() for path in group.get("source_thought_paths") or []]
-    if isinstance(source_ideas_source, list):
-        source_ideas = [f"- {item}" for item in _source_idea_strings(source_ideas_source) if item]
-    else:
-        source_ideas = [f"- {str(source_ideas_source)}"]
-    proposed_work = [f"- {item}" for item in _source_idea_strings(canonical_thoughts)[:5]]
+def _sprint_handoff_payload(record: dict[str, object], thoughts: list[dict[str, str]] | None = None) -> dict[str, object]:
+    canonical_thoughts = _canonicalize_source_thoughts([thought for thought in (thoughts or []) if isinstance(thought, dict)])
+    if not canonical_thoughts:
+        canonical_thoughts = _canonicalize_source_thoughts(_resolve_sprint_source_thoughts(record))
+    source_idea_summaries = _source_idea_strings(canonical_thoughts)
+    if not source_idea_summaries:
+        source_idea_summaries = [str(item).strip() for item in record.get("canonical_source_ideas") or record.get("source_idea_summaries") or record.get("source_ideas") or [] if str(item).strip()]
+    proposed_work = [str(item).strip() for item in record.get("canonical_proposed_work") or record.get("proposed_work") or [] if str(item).strip()]
     if not proposed_work:
-        proposed_work = list(source_ideas)
+        proposed_work = list(source_idea_summaries)
+    purpose = str(record.get("purpose") or "").strip() or f"Turn {str(record.get('app_product') or 'Worklog')} raw ideas into a focused sprint-sized implementation conversation."
+    sprint_code = str(record.get("intended_sprint_code") or record.get("sprint_code") or (canonical_thoughts[0].get("sprint_code") if canonical_thoughts else "") or "TBD").strip()
+    app_product = str(record.get("app_product") or "Worklog")
+    sprint_name = str(record.get("sprint_group_name") or record.get("title") or "Sprint")
+    recommended_first_step = str(record.get("recommended_first_step") or "").strip() or (
+        canonical_thoughts[0].get("normalized_summary")
+        if canonical_thoughts and canonical_thoughts[0].get("normalized_summary")
+        else "Open the source ideas, confirm the smallest common implementation slice, and outline the first chat response."
+    )
+    scope = str(record.get("scope") or "").strip() or _sprint_group_scope(canonical_thoughts)
+    starting_prompt = str(record.get("starting_prompt") or "").strip() or _build_codex_prompt(app_product, sprint_name, canonical_thoughts, sprint_code, purpose)
+    return {
+        "canonical_thoughts": canonical_thoughts,
+        "source_idea_summaries": source_idea_summaries,
+        "proposed_work": proposed_work,
+        "purpose": purpose,
+        "sprint_code": sprint_code,
+        "app_product": app_product,
+        "sprint_name": sprint_name,
+        "recommended_first_step": recommended_first_step,
+        "scope": scope,
+        "starting_prompt": starting_prompt,
+    }
+
+
+def _build_handoff_markdown_from_record(record: dict[str, object], thoughts: list[dict[str, str]] | None = None) -> str:
+    payload = _sprint_handoff_payload(record, thoughts)
+    source_ideas = [f"- {item}" for item in payload["source_idea_summaries"]]
+    proposed_work = [f"- {item}" for item in payload["proposed_work"]]
     return "\n".join(
         [
-            f"# Sprint Handoff: {sprint_name}",
+            f"# Sprint Handoff: {payload['sprint_name']}",
             "",
             "## Sprint Code",
-            sprint_code,
+            payload["sprint_code"],
             "",
             f"## App/Product",
-            app_name,
+            payload["app_product"],
             "",
             "## Purpose",
-            purpose,
+            payload["purpose"],
             "",
             "## Source Ideas",
             *(source_ideas or ["- No handoff content found. Regenerate handoff."]),
@@ -2537,16 +2559,16 @@ def _build_handoff_markdown(app_name: str, sprint_name: str, thoughts: list[dict
             *(proposed_work or ["- Triage raw ideas into a focused implementation plan."]),
             "",
             "## Suggested Scope",
-            str(group.get("scope") or _sprint_group_scope(thoughts)),
+            payload["scope"],
             "",
             "## Recommended First Step",
-            str(group.get("recommended_first_step") or (thoughts[0].get("normalized_summary") if thoughts else "Open the source ideas, confirm the smallest common implementation slice, and outline the first chat response.")),
+            payload["recommended_first_step"],
             "",
             "## Completion Requirement",
-            f"When implementation is finished but not deployed, mark the sprint Completed. When deployed to DEV or staging and ready for validation, mark the sprint Staged. When deployed to production or live, mark the sprint Shipped. Update Worklog using Sprint Code {sprint_code}.",
+            f"When implementation is finished but not deployed, mark the sprint Completed. When deployed to DEV or staging and ready for validation, mark the sprint Staged. When deployed to production or live, mark the sprint Shipped. Update Worklog using Sprint Code {payload['sprint_code']}.",
             "",
             "## Codex/ChatGPT Starting Prompt",
-            str(group.get("starting_prompt") or _build_codex_prompt(app_name, sprint_name, canonical_thoughts, sprint_code)),
+            payload["starting_prompt"],
             "",
         ]
     )
@@ -2583,11 +2605,18 @@ def _proposal_from_digest_group(group: dict[str, object]) -> dict[str, object]:
         "source_created_ats": source_created_ats,
         "source_idea_summaries": source_idea_summaries,
         "proposed_work": _source_idea_strings(thoughts) or group.get("proposed_work") or source_idea_summaries,
-        "handoff_md": _build_handoff_markdown(
-            str(group.get("app_product") or "Other"),
-            str(group.get("sprint_group_name") or "Sprint"),
+        "canonical_source_ideas": source_idea_summaries,
+        "canonical_proposed_work": _source_idea_strings(thoughts) or group.get("proposed_work") or source_idea_summaries,
+        "starting_prompt": str(group.get("starting_prompt") or ""),
+        "handoff_md": _build_handoff_markdown_from_record(
+            {
+                **group,
+                "intended_sprint_code": intended_sprint_code,
+                "canonical_source_ideas": source_idea_summaries,
+                "canonical_proposed_work": _source_idea_strings(thoughts) or group.get("proposed_work") or source_idea_summaries,
+                "starting_prompt": str(group.get("starting_prompt") or ""),
+            },
             thoughts,
-            {**group, "intended_sprint_code": intended_sprint_code},
         ),
     }
 
