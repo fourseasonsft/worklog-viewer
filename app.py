@@ -961,6 +961,48 @@ def _thought_created_at_from_path(path: Path) -> str:
     return str(parsed.get("created_at") or "").strip()
 
 
+def _canonicalize_source_thoughts(thoughts: list[dict[str, object]]) -> list[dict[str, object]]:
+    deduped: list[dict[str, object]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for thought in thoughts:
+        if not isinstance(thought, dict):
+            continue
+        key = (
+            str(thought.get("thought_id") or thought.get("thought_fingerprint") or "").strip().lower(),
+            str(thought.get("path") or thought.get("source_thought_path") or "").strip().lower(),
+            str(thought.get("normalized_summary") or thought.get("display_snippet") or thought.get("raw_text_full") or thought.get("title") or "").strip().lower(),
+            str(thought.get("raw_text_full") or thought.get("raw_text") or thought.get("raw") or "").strip().lower(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(thought)
+    return deduped
+
+
+def _source_idea_strings(thoughts: list[dict[str, object]]) -> list[str]:
+    deduped = _canonicalize_source_thoughts(thoughts)
+    items: list[str] = []
+    seen: set[str] = set()
+    for thought in deduped:
+        text = str(
+            thought.get("normalized_summary")
+            or thought.get("display_snippet")
+            or thought.get("raw_text_full")
+            or thought.get("title")
+            or thought.get("path")
+            or ""
+        ).strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(text)
+    return items
+
+
 def _restore_source_ideas_for_record(record: dict[str, object], restore_reason: str = "rescinded") -> tuple[list[str], list[str], dict[str, int]]:
     restored: list[str] = []
     warnings: list[str] = []
@@ -1226,18 +1268,19 @@ def _approve_proposed_sprint_record(record: dict[str, object]) -> dict[str, obje
 
 
 def _proposal_to_sprint_record(proposal: dict[str, object]) -> tuple[dict[str, object], Path, Path]:
-    active_thoughts = _thoughts_by_ids([str(item) for item in proposal.get("source_thought_ids", []) if str(item).strip()])
+    active_thoughts = _canonicalize_source_thoughts(_thoughts_by_ids([str(item) for item in proposal.get("source_thought_ids", []) if str(item).strip()]))
     if not active_thoughts:
-        active_thoughts = _thoughts_by_paths([str(path) for path in proposal.get("source_thought_paths", [])])
+        active_thoughts = _canonicalize_source_thoughts(_thoughts_by_paths([str(path) for path in proposal.get("source_thought_paths", [])]))
     if not active_thoughts and proposal.get("source_ideas"):
         wanted = {str(item).strip().lower() for item in proposal.get("source_ideas", []) if str(item).strip()}
         for item in _thought_box_items(digested_only=False):
             normalized = str(item.get("normalized_summary") or item.get("display_snippet") or item.get("title") or "").strip().lower()
             if normalized and normalized in wanted:
                 active_thoughts.append(item)
+        active_thoughts = _canonicalize_source_thoughts(active_thoughts)
     proposal_source_paths = [item["path"] for item in active_thoughts]
     proposal_source_ids = [_thought_item_fingerprint(item) for item in active_thoughts]
-    proposal_source_summaries = [item.get("normalized_summary") or item.get("display_snippet") or item.get("title") for item in active_thoughts]
+    proposal_source_summaries = _source_idea_strings(active_thoughts)
     if not proposal_source_summaries and proposal.get("source_ideas"):
         proposal_source_summaries = [str(item) for item in proposal.get("source_ideas", []) if str(item).strip()]
     if not proposal.get("proposed_work") and proposal_source_summaries:
@@ -1485,10 +1528,10 @@ def _set_sprint_status(record: dict[str, object], status: str) -> Path:
 
 
 def _resolve_sprint_source_thoughts(record: dict[str, object]) -> list[dict[str, str]]:
-    thoughts = _thoughts_by_ids([str(item) for item in record.get("source_thought_ids", []) if str(item).strip()])
+    thoughts = _canonicalize_source_thoughts(_thoughts_by_ids([str(item) for item in record.get("source_thought_ids", []) if str(item).strip()]))
     if thoughts:
         return thoughts
-    thoughts = _thoughts_by_paths([str(item) for item in record.get("source_thought_paths", []) if str(item).strip()])
+    thoughts = _canonicalize_source_thoughts(_thoughts_by_paths([str(item) for item in record.get("source_thought_paths", []) if str(item).strip()]))
     if thoughts:
         return thoughts
     wanted = {str(item).strip().lower() for item in record.get("source_idea_summaries", []) if str(item).strip()}
@@ -1500,6 +1543,7 @@ def _resolve_sprint_source_thoughts(record: dict[str, object]) -> list[dict[str,
             normalized = str(item.get("normalized_summary") or item.get("display_snippet") or item.get("raw_text_full") or item.get("title") or "").strip().lower()
             if normalized and normalized in wanted:
                 matched.append(item)
+        matched = _canonicalize_source_thoughts(matched)
     if matched:
         return matched
     fallback_texts = [str(item).strip() for item in record.get("source_idea_summaries", []) if str(item).strip()]
@@ -2245,15 +2289,8 @@ def _sprint_group_priority(thoughts: list[dict[str, str]]) -> str:
 
 
 def _build_codex_prompt(app_name: str, sprint_name: str, thoughts: list[dict[str, str]], sprint_code: str = "", purpose: str = "") -> str:
-    source_titles = ", ".join(
-        thought.get("normalized_summary")
-        or thought.get("display_snippet")
-        or thought.get("raw_text_full")
-        or thought.get("title")
-        or thought.get("path")
-        or "Worklog idea"
-        for thought in thoughts[:5]
-    )
+    canonical_thoughts = _canonicalize_source_thoughts([thought for thought in thoughts if isinstance(thought, dict)])
+    source_titles = ", ".join(_source_idea_strings(canonical_thoughts)[:5])
     purpose = purpose or (thoughts[0].get("purpose") if thoughts else "Turn raw ideas into a focused sprint.")
     return (
         f"Start a focused implementation conversation for {app_name}. "
@@ -2267,24 +2304,17 @@ def _build_codex_prompt(app_name: str, sprint_name: str, thoughts: list[dict[str
 
 
 def _build_handoff_markdown(app_name: str, sprint_name: str, thoughts: list[dict[str, str]], group: dict[str, object]) -> str:
+    canonical_thoughts = _canonicalize_source_thoughts([thought for thought in thoughts if isinstance(thought, dict)])
     purpose = group.get("purpose") or f"Turn {app_name} raw ideas into a focused sprint-sized implementation conversation."
-    sprint_code = str(group.get("intended_sprint_code") or group.get("sprint_code") or (thoughts[0].get("sprint_code") if thoughts else "") or "TBD").strip()
-    source_ideas_source = thoughts or group.get("source_idea_summaries") or group.get("source_ideas") or []
+    sprint_code = str(group.get("intended_sprint_code") or group.get("sprint_code") or (canonical_thoughts[0].get("sprint_code") if canonical_thoughts else "") or "TBD").strip()
+    source_ideas_source = canonical_thoughts or group.get("source_idea_summaries") or group.get("source_ideas") or []
     if not source_ideas_source and group.get("source_thought_paths"):
         source_ideas_source = [Path(str(path)).stem.replace("-", " ").title() for path in group.get("source_thought_paths") or []]
     if isinstance(source_ideas_source, list):
-        source_ideas = [
-            f"- {item.get('normalized_summary') or item.get('raw_text_full') or item.get('display_snippet') or item.get('title') or item.get('path')}"
-            if isinstance(item, dict)
-            else f"- {str(item)}"
-            for item in source_ideas_source
-        ]
+        source_ideas = [f"- {item}" for item in _source_idea_strings(source_ideas_source) if item]
     else:
         source_ideas = [f"- {str(source_ideas_source)}"]
-    proposed_work = [
-        f"- {thought.get('normalized_summary') or thought.get('raw_text_full') or thought.get('display_snippet') or thought.get('title') or 'Worklog idea'}"
-        for thought in thoughts[:5]
-    ]
+    proposed_work = [f"- {item}" for item in _source_idea_strings(canonical_thoughts)[:5]]
     if not proposed_work:
         proposed_work = list(source_ideas)
     return "\n".join(
@@ -2316,7 +2346,7 @@ def _build_handoff_markdown(app_name: str, sprint_name: str, thoughts: list[dict
             f"When implementation is finished but not deployed, mark the sprint Completed. When deployed to DEV or staging and ready for validation, mark the sprint Staged. When deployed to production or live, mark the sprint Shipped. Update Worklog using Sprint Code {sprint_code}.",
             "",
             "## Codex/ChatGPT Starting Prompt",
-            str(group.get("starting_prompt") or _build_codex_prompt(app_name, sprint_name, thoughts, sprint_code)),
+            str(group.get("starting_prompt") or _build_codex_prompt(app_name, sprint_name, canonical_thoughts, sprint_code)),
             "",
         ]
     )
@@ -2330,16 +2360,13 @@ def _preview_thought_items(items: list[dict[str, str]]) -> dict[str, object]:
 
 
 def _proposal_from_digest_group(group: dict[str, object]) -> dict[str, object]:
-    thoughts = [thought for thought in group.get("thoughts") or [] if isinstance(thought, dict)]
+    thoughts = _canonicalize_source_thoughts([thought for thought in group.get("thoughts") or [] if isinstance(thought, dict)])
     intended_sprint_code = str(
         group.get("intended_sprint_code")
         or group.get("sprint_code")
         or _generate_sprint_code(str(group.get("app_product") or "Other"))
     )
-    source_idea_summaries = [
-        thought.get("normalized_summary") or thought.get("display_snippet") or thought.get("raw_text_full") or thought.get("title") or thought.get("path")
-        for thought in thoughts
-    ]
+    source_idea_summaries = _source_idea_strings(thoughts)
     source_thought_paths = [thought.get("path") for thought in thoughts if thought.get("path")]
     source_thought_ids = [_thought_item_fingerprint(thought) for thought in thoughts if thought.get("path")]
     source_created_ats = [thought.get("created_at") or "" for thought in thoughts if thought.get("path")]
@@ -2355,7 +2382,7 @@ def _proposal_from_digest_group(group: dict[str, object]) -> dict[str, object]:
         "source_thought_ids": source_thought_ids,
         "source_created_ats": source_created_ats,
         "source_idea_summaries": source_idea_summaries,
-        "proposed_work": group.get("proposed_work") or source_idea_summaries,
+        "proposed_work": _source_idea_strings(thoughts) or group.get("proposed_work") or source_idea_summaries,
         "handoff_md": _build_handoff_markdown(
             str(group.get("app_product") or "Other"),
             str(group.get("sprint_group_name") or "Sprint"),
@@ -2375,6 +2402,7 @@ def _create_proposed_sprints_from_preview(preview: dict[str, object], mode: str 
                     all_thoughts.append(thought)
         if not all_thoughts:
             all_thoughts = [thought for thought in _thought_box_items(digested_only=False) if isinstance(thought, dict)]
+        all_thoughts = _canonicalize_source_thoughts(all_thoughts)
         if not all_thoughts:
             return []
         app_product = preview.get("combined_app_product") or max(
@@ -2434,6 +2462,7 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
         if inferred_app not in APP_ORDER:
             inferred_app = "Other"
         active_items.append({**item, **inferred, "ai_inferred_app": inferred_app, "normalized_summary": _normalize_idea_summary(raw, item.get("title", ""), item.get("path", ""))})
+    active_items = _canonicalize_source_thoughts(active_items)
 
     grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
     for item in active_items:
@@ -2450,7 +2479,7 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
             {
                 "app_product": app_name,
                 "thought_count": len(thoughts),
-                "thought_titles": [thought.get("normalized_summary") or thought.get("display_snippet") or thought.get("title") or thought.get("path") for thought in thoughts[:5]],
+                "thought_titles": _source_idea_strings(thoughts[:5]),
             }
         )
         by_cluster: dict[str, list[dict[str, str]]] = defaultdict(list)
@@ -2497,8 +2526,8 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
                 "feasibility": feasibility,
                 "suggested_priority": priority,
                 "recommended_first_step": first_step,
-                "source_thoughts": [thought["path"] for thought in cluster_thoughts],
-                "proposed_work": [thought.get("normalized_summary") or thought.get("display_snippet") or thought.get("raw_text_full") for thought in cluster_thoughts if thought.get("raw_text_full")],
+            "source_thoughts": [thought["path"] for thought in _canonicalize_source_thoughts(cluster_thoughts)],
+            "proposed_work": _source_idea_strings(cluster_thoughts),
                 "scope": _sprint_group_scope(cluster_thoughts),
                 "purpose": purpose,
                 "starting_prompt": "",
@@ -2524,7 +2553,7 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
                 "suggested_priority": _sprint_group_priority([thought]),
                 "recommended_first_step": thought.get("normalized_summary") or "Review the source idea.",
                 "source_thoughts": [thought["path"]],
-                "proposed_work": [thought.get("normalized_summary") or thought.get("raw_text_full")] if thought.get("raw_text_full") else [],
+                "proposed_work": _source_idea_strings([thought]) if thought.get("raw_text_full") else [],
                 "scope": "Small",
                 "purpose": "Clean up the Worklog Idea Inventory and navigation experience by improving row selection, date formatting, and menu simplicity."
                 if thought["ai_inferred_app"] == "Worklog"

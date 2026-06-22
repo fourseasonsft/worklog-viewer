@@ -506,6 +506,34 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("Completion Requirement", text)
         self.assertIn("Sprint Code:", text)
 
+    def test_proposal_builder_dedupes_duplicate_sources(self) -> None:
+        thought = {
+            "thought_id": "abc123",
+            "path": "04-inbox/thought-box/test123.md",
+            "normalized_summary": "Test123.",
+            "display_snippet": "Test123.",
+            "raw_text_full": "Test123.",
+            "title": "Test123",
+            "created_at": "2026-06-20T10:00:00Z",
+        }
+        proposal = viewer_app._proposal_from_digest_group(
+            {
+                "app_product": "Worklog",
+                "sprint_group_name": "Worklog Idea Inventory Cleanup",
+                "thoughts": [thought, {**thought}],
+                "source_ideas": ["Test123.", "Test123."],
+                "source_idea_summaries": ["Test123.", "Test123."],
+                "proposed_work": ["Test123.", "Test123."],
+                "starting_prompt": "",
+            }
+        )
+        self.assertEqual(proposal["source_idea_summaries"], ["Test123."])
+        self.assertEqual(proposal["proposed_work"], ["Test123."])
+        handoff = proposal["handoff_md"]
+        self.assertEqual(handoff.split("## Source Ideas")[1].split("## Proposed Work")[0].count("Test123."), 1)
+        self.assertEqual(handoff.split("## Proposed Work")[1].split("## Suggested Scope")[0].count("Test123."), 1)
+        self.assertEqual(handoff.split("## Codex/ChatGPT Starting Prompt")[1].count("Test123."), 1)
+
     def test_no_thoughts_empty_state_works(self) -> None:
         html = self._client().get("/assistant").get_data(as_text=True)
         self.assertIn("No active raw ideas yet.", html)
