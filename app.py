@@ -800,7 +800,15 @@ def _restore_source_thought_path(source_path: str) -> tuple[str | None, str | No
                     target = candidate
                     break
         target.parent.mkdir(parents=True, exist_ok=True)
-        source_file.rename(target)
+        try:
+            shutil.move(str(source_file), str(target))
+        except OSError:
+            try:
+                target.write_text(source_file.read_text(encoding="utf-8"), encoding="utf-8")
+            except OSError as exc:
+                if target.exists():
+                    return str(target.relative_to(WORKLOG_ROOT)), None
+                return None, f"unable to restore source idea: {source_path} ({exc})"
         return str(target.relative_to(WORKLOG_ROOT)), None
     if active_target.exists():
         return str(active_target.relative_to(WORKLOG_ROOT)), None
@@ -823,26 +831,31 @@ def _recreate_restored_thought(source_path: str, summary: str, sprint_code: str,
                 break
     target.parent.mkdir(parents=True, exist_ok=True)
     restored_at = datetime.now(timezone.utc).isoformat()
-    target.write_text(
-        "\n".join(
-            [
-                f"# Restored Idea: {source_name}",
-                "",
-                f"- restored_from_sprint_code: {sprint_code or ''}",
-                f"- restored_at: {restored_at}",
-                f"- restore_reason: {restore_reason}",
-                f"- status: raw",
-                f"- digest_status: not_digested",
-                f"- raw_text: {summary}",
-                f"- ai_summary: {summary}",
-                "",
-                "## Raw Thought",
-                summary,
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    try:
+        target.write_text(
+            "\n".join(
+                [
+                    f"# Restored Idea: {source_name}",
+                    "",
+                    f"- restored_from_sprint_code: {sprint_code or ''}",
+                    f"- restored_at: {restored_at}",
+                    f"- restore_reason: {restore_reason}",
+                    f"- status: raw",
+                    f"- digest_status: not_digested",
+                    f"- raw_text: {summary}",
+                    f"- ai_summary: {summary}",
+                    "",
+                    "## Raw Thought",
+                    summary,
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        if target.exists():
+            return str(target.relative_to(WORKLOG_ROOT)), None
+        return None, f"unable to recreate source idea: {source_path} ({exc})"
     return str(target.relative_to(WORKLOG_ROOT)), None
 
 
