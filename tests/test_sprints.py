@@ -422,6 +422,41 @@ class WorklogSprintQueueTests(unittest.TestCase):
         content = rescinded_path.read_text(encoding="utf-8")
         self.assertIn("missing_source_ideas_count", content)
 
+    def test_missing_source_file_is_recreated_from_summary(self) -> None:
+        self._create_proposed_sprint_record()
+        client = self._client()
+        record_id = viewer_app._sprint_records()[0]["id"]
+        client.post(f"/sprints/{record_id}/action", data={"action": "approve"}, follow_redirects=True)
+        approved = viewer_app._sprint_records()[0]
+        for rel in [
+            "04-inbox/thought-box/ims-ui.md",
+            "04-inbox/thought-box/worklog-queue.md",
+            "04-inbox/thought-box/digested/ims-ui.md",
+            "04-inbox/thought-box/digested/worklog-queue.md",
+        ]:
+            path = self.root / rel
+            if path.exists():
+                path.unlink()
+        approved_path = self.root / "06-sprints/approved" / Path(approved["path"]).name
+        text = approved_path.read_text(encoding="utf-8")
+        text = text.replace(
+            "- source_thought_paths: 04-inbox/thought-box/ims-ui.md, 04-inbox/thought-box/worklog-queue.md\n",
+            "- source_thought_paths: 04-inbox/thought-box/missing-a.md, 04-inbox/thought-box/missing-b.md\n",
+        )
+        approved_path.write_text(text, encoding="utf-8")
+        response = client.post(
+            f"/sprints/{approved['id']}/action",
+            data={"action": "rescind", "confirm": "rescind this sprint and return its ideas to inventory?"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        restored = sorted((self.root / "04-inbox/thought-box").glob("*.md"))
+        self.assertTrue(restored)
+        restored_text = restored[0].read_text(encoding="utf-8")
+        self.assertIn("restored_from_sprint_code", restored_text)
+        self.assertIn("restore_reason", restored_text)
+        self.assertIn("Improve the IMS queue surface.", restored_text)
+
     def test_confirmation_routes_require_post(self) -> None:
         self._create_sprint_record("approved")
         response = self._client().get("/sprints/sp-20260620120000-approved/action")

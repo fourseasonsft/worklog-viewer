@@ -807,7 +807,46 @@ def _restore_source_thought_path(source_path: str) -> tuple[str | None, str | No
     return None, f"missing source idea: {source_path}"
 
 
-def _restore_source_ideas_for_record(record: dict[str, object]) -> tuple[list[str], list[str]]:
+def _recreate_restored_thought(source_path: str, summary: str, sprint_code: str, restore_reason: str) -> tuple[str | None, str | None]:
+    summary = summary.strip()
+    if not summary:
+        return None, f"missing source idea: {source_path}"
+    source_name = Path(source_path).name or _slugify_title(summary)
+    target = THOUGHT_BOX_DIR / source_name
+    if target.exists():
+        stem = target.stem
+        suffix = target.suffix or ".md"
+        for index in range(2, 1000):
+            candidate = THOUGHT_BOX_DIR / f"{stem}-restored-{index:03d}{suffix}"
+            if not candidate.exists():
+                target = candidate
+                break
+    target.parent.mkdir(parents=True, exist_ok=True)
+    restored_at = datetime.now(timezone.utc).isoformat()
+    target.write_text(
+        "\n".join(
+            [
+                f"# Restored Idea: {source_name}",
+                "",
+                f"- restored_from_sprint_code: {sprint_code or ''}",
+                f"- restored_at: {restored_at}",
+                f"- restore_reason: {restore_reason}",
+                f"- status: raw",
+                f"- digest_status: not_digested",
+                f"- raw_text: {summary}",
+                f"- ai_summary: {summary}",
+                "",
+                "## Raw Thought",
+                summary,
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return str(target.relative_to(WORKLOG_ROOT)), None
+
+
+def _restore_source_ideas_for_record(record: dict[str, object], restore_reason: str = "rescinded") -> tuple[list[str], list[str]]:
     restored: list[str] = []
     warnings: list[str] = []
     candidates = list(dict.fromkeys([
@@ -815,12 +854,43 @@ def _restore_source_ideas_for_record(record: dict[str, object]) -> tuple[list[st
         *[str(item) for item in record.get("source_thought_paths", []) if str(item).strip()],
         *[str(item) for item in record.get("source_thoughts", []) if str(item).strip()],
     ]))
-    for source_path in candidates:
+    summaries = [
+        str(item)
+        for item in (
+            record.get("source_idea_summaries")
+            or record.get("source_ideas")
+            or []
+        )
+        if str(item).strip()
+    ]
+    sprint_code = str(record.get("sprint_code") or record.get("intended_sprint_code") or "")
+    for index, source_path in enumerate(candidates):
         restored_path, warning = _restore_source_thought_path(source_path)
         if restored_path:
             restored.append(restored_path)
-        if warning:
+            continue
+        source_summary = ""
+        if summaries:
+            source_summary = summaries[min(index, len(summaries) - 1)]
+        recreated_path, recreate_warning = _recreate_restored_thought(source_path, source_summary, sprint_code, restore_reason)
+        if recreated_path:
+            restored.append(recreated_path)
+        if recreate_warning:
+            warnings.append(recreate_warning)
+        elif warning:
             warnings.append(warning)
+    if not candidates and summaries:
+        for index, summary in enumerate(summaries, start=1):
+            recreated_path, recreate_warning = _recreate_restored_thought(
+                f"restored-summary-{index}.md",
+                summary,
+                sprint_code,
+                restore_reason,
+            )
+            if recreated_path:
+                restored.append(recreated_path)
+            if recreate_warning:
+                warnings.append(recreate_warning)
     return restored, warnings
 
 
@@ -1173,6 +1243,7 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
         title = path.stem.split("-", 1)[1].replace("-", " ").title() if "-" in path.stem else path.stem.title()
     source_thoughts = []
     source_thought_paths = []
+    source_ideas = []
     source_idea_summaries = []
     digested_source_thoughts = []
     proposed_work = []
@@ -1183,6 +1254,8 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
             continue
         if current_section in {"source ideas", "source thought(s)"} and line.startswith("- "):
             source_thoughts.append(line[2:].strip())
+            if current_section == "source ideas":
+                source_ideas.append(line[2:].strip())
         elif current_section == "source thought paths" and line.startswith("- "):
             source_thought_paths.append(line[2:].strip())
         elif current_section == "source idea summaries" and line.startswith("- "):
@@ -1211,8 +1284,9 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
         "updated_at": meta.get("updated_at") or _format_file_timestamp(path),
         "path": str(path.relative_to(WORKLOG_ROOT)),
         "source_thoughts": source_thoughts,
+        "source_ideas": source_ideas,
         "source_thought_paths": source_thought_paths,
-        "source_idea_summaries": source_idea_summaries or source_thoughts,
+        "source_idea_summaries": source_idea_summaries or source_ideas or source_thoughts,
         "digested_source_thoughts": digested_source_thoughts,
         "proposed_work": proposed_work,
         "handoff_path": handoff_path,
@@ -1653,7 +1727,7 @@ def _rescind_or_delete_sprint(record: dict[str, object], status: str, reason: st
     if status not in {"rescinded", "deleted"}:
         raise ValueError(f"Unsupported archive status: {status}")
 
-    restored_paths, warnings = _restore_source_ideas_for_record(record)
+    restored_paths, warnings = _restore_source_ideas_for_record(record, restore_reason=status)
     record = {**record}
     record["restored_source_thought_paths"] = restored_paths
     record["restored_source_ideas_count"] = len(restored_paths)
