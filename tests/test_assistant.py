@@ -104,6 +104,7 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("digest-modal-footer", html)
         self.assertIn("data-thought-path", html)
         self.assertIn(">Inbox<", html)
+        self.assertNotIn("assistant-form", html)
         self.assertNotIn("Inbox / New", html)
         self.assertNotIn("Inbox / Bugs", html)
         self.assertNotIn("Inbox / Features", html)
@@ -119,6 +120,7 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("Mark Duplicate", html)
         self.assertIn("Move", html)
         self.assertIn("selected-count-badge", html)
+        self.assertNotIn("One clear capture input", html)
         self.assertNotIn('class="archive-button"', html)
         self.assertNotIn("Inventory Actions", html)
 
