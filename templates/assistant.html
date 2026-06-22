@@ -128,71 +128,7 @@
         <div id="digest-preview-empty" class="{% if digest_preview %}d-none{% endif %} text-secondary">
           Request a digest to review suggested groups before creating proposed sprint records.
         </div>
-        <div id="digest-preview-body" class="{% if not digest_preview %}d-none{% endif %}">
-          {% if digest_preview %}
-            <div class="card border-0 bg-body-tertiary mb-3">
-              <div class="card-body d-flex flex-wrap gap-3 justify-content-between align-items-center">
-                <div>
-                  <div class="small text-secondary text-uppercase fw-semibold">Selected Ideas</div>
-                  <div class="h4 mb-0" id="digest-selected-count">{{ digest_preview.selected_idea_count or digest_preview.source_idea_count or digest_preview.active_items|length }}</div>
-                </div>
-              </div>
-            </div>
-            <div class="review-table-wrap mb-3">
-              <div class="table-responsive">
-              <table class="table inbox-table align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th>Group Name</th>
-                    <th>App/Product</th>
-                    <th>Ideas Included</th>
-                    <th>Scope</th>
-                    <th>Suggested Priority</th>
-                    <th>Actions / Selection</th>
-                  </tr>
-                </thead>
-                <tbody id="digest-sprint-table">
-                  {% for group in digest_preview.sprint_groups %}
-                    <tr>
-                      <td class="fw-semibold">{{ group.sprint_group_name }}</td>
-                      <td>{{ group.app_product }}</td>
-                      <td>{{ group.ideas_included }}</td>
-                      <td>{{ group.scope }}</td>
-                      <td>{{ group.suggested_priority }}</td>
-                      <td><input class="form-check-input" type="checkbox" checked disabled> <span class="text-secondary small ms-2">Suggested</span></td>
-                    </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-            </div>
-            <div class="review-table-wrap">
-              <div class="table-responsive">
-              <table class="table inbox-table align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th>Created</th>
-                    <th>Raw Thought</th>
-                    <th>Inferred App/Product</th>
-                  </tr>
-                </thead>
-                <tbody id="digest-source-table">
-                  {% for item in digest_preview.active_items %}
-                    <tr>
-                      <td class="text-nowrap">{{ item.created_display or item.created_at or item.mtime_display or 'Unknown' }}</td>
-                      <td>
-                        <div class="fw-semibold">{{ item.title }}</div>
-                        <div class="text-secondary small">{{ item.display_snippet or item.normalized_summary or 'No raw text recorded.' }}</div>
-                      </td>
-                      <td><span class="badge text-bg-light border">{{ item.ai_inferred_app or 'Other' }}</span></td>
-                    </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-            </div>
-          {% endif %}
-        </div>
+        <div id="digest-preview-body" class="{% if not digest_preview %}d-none{% endif %}"></div>
         <div id="digest-modal-result" class="alert d-none mt-3 mb-0" role="alert"></div>
       </div>
       <div class="modal-footer digest-modal-footer">
@@ -216,9 +152,6 @@
   const input = form.querySelector('textarea[name="message"]');
   const previewBody = document.getElementById('digest-preview-body');
   const previewEmpty = document.getElementById('digest-preview-empty');
-  const digestSelectedCount = document.getElementById('digest-selected-count');
-  const digestSprintTable = document.getElementById('digest-sprint-table');
-  const digestSourceTable = document.getElementById('digest-source-table');
   const createSuggestedGroupsButton = document.getElementById('create-suggested-groups-button');
   const combineAllButton = document.getElementById('combine-all-button');
   const cancelGroupingButton = document.getElementById('cancel-grouping-button');
@@ -360,46 +293,72 @@
       suggested_group_count: sprintGroups.length,
       selected_idea_count: data.selected_idea_count || data.source_idea_count || 0,
     });
-    if (digestSelectedCount) {
-      digestSelectedCount.textContent = data.selected_idea_count || data.source_idea_count || sourceItems.length || 0;
-    }
-    if (digestSprintTable) {
-      digestSprintTable.innerHTML = '';
-      const groupsToRender = sprintGroups.length ? sprintGroups : [];
-      if (!groupsToRender.length) {
-        digestSprintTable.innerHTML = '<tr><td colspan="6" class="text-secondary">No suggested sprint groups found.</td></tr>';
-      }
-      groupsToRender.forEach((group) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td class="fw-semibold">${group.sprint_group_name || ''}</td>
-          <td>${group.app_product || ''}</td>
-          <td>${group.ideas_included || 0}</td>
-          <td>${group.scope || ''}</td>
-          <td>${group.suggested_priority || ''}</td>
-          <td><input class="form-check-input" type="checkbox" checked disabled> <span class="text-secondary small ms-2">Suggested</span></td>
-        `;
-        digestSprintTable.appendChild(tr);
-      });
-    }
-    if (digestSourceTable) {
-      digestSourceTable.innerHTML = '';
-      if (!sourceItems.length) {
-        digestSourceTable.innerHTML = '<tr><td colspan="3" class="text-secondary">No source ideas found in digest payload.</td></tr>';
-      }
-      sourceItems.forEach((item) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td class="text-nowrap">${item.created_display || item.created_at || item.mtime_display || 'Unknown'}</td>
-          <td>
-            <div class="fw-semibold">${item.title || ''}</div>
-            <div class="text-secondary small">${item.display_snippet || item.normalized_summary || 'No raw text recorded.'}</div>
-          </td>
-          <td><span class="badge text-bg-light border">${item.ai_inferred_app || 'Other'}</span></td>
-        `;
-        digestSourceTable.appendChild(tr);
-      });
-    }
+    const selectedCount = data.selected_idea_count || data.source_idea_count || sourceItems.length || 0;
+    const sourceRows = sourceItems.length
+      ? sourceItems.map((item) => `
+          <tr>
+            <td class="text-nowrap">${item.created_display || item.created_at || item.mtime_display || 'Unknown'}</td>
+            <td>
+              <div class="fw-semibold">${item.title || ''}</div>
+              <div class="text-secondary small">${item.display_snippet || item.normalized_summary || 'No raw text recorded.'}</div>
+            </td>
+            <td><span class="badge text-bg-light border">${item.ai_inferred_app || 'Other'}</span></td>
+          </tr>
+        `).join('')
+      : '<tr><td colspan="3" class="text-secondary">No source ideas found in digest payload.</td></tr>';
+    const groupRows = sprintGroups.length
+      ? sprintGroups.map((group) => `
+          <tr>
+            <td class="fw-semibold">${group.sprint_group_name || ''}</td>
+            <td>${group.app_product || ''}</td>
+            <td>${group.ideas_included || 0}</td>
+            <td>${group.scope || ''}</td>
+            <td>${group.suggested_priority || ''}</td>
+            <td><input class="form-check-input" type="checkbox" checked disabled> <span class="text-secondary small ms-2">Suggested</span></td>
+          </tr>
+        `).join('')
+      : '<tr><td colspan="6" class="text-secondary">No suggested sprint groups found.</td></tr>';
+    previewBody.innerHTML = `
+      <div class="card border-0 bg-body-tertiary mb-3">
+        <div class="card-body d-flex flex-wrap gap-3 justify-content-between align-items-center">
+          <div>
+            <div class="small text-secondary text-uppercase fw-semibold">Selected Ideas</div>
+            <div class="h4 mb-0" id="digest-selected-count">${selectedCount}</div>
+          </div>
+        </div>
+      </div>
+      <div class="review-table-wrap mb-3">
+        <div class="table-responsive">
+          <table class="table inbox-table align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Group Name</th>
+                <th>App/Product</th>
+                <th>Ideas Included</th>
+                <th>Scope</th>
+                <th>Suggested Priority</th>
+                <th>Actions / Selection</th>
+              </tr>
+            </thead>
+            <tbody id="digest-sprint-table">${groupRows}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="review-table-wrap">
+        <div class="table-responsive">
+          <table class="table inbox-table align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Created</th>
+                <th>Raw Thought</th>
+                <th>Inferred App/Product</th>
+              </tr>
+            </thead>
+            <tbody id="digest-source-table">${sourceRows}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
     openDigestModal();
   }
 

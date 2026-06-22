@@ -289,6 +289,8 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("review suggested sprint groups before creating proposals", html.lower())
         self.assertNotIn("new bootstrap.Modal", html)
         self.assertIn("review-modal-content", html)
+        self.assertIn("digest-preview-body", html)
+        self.assertIn("digest-modal-result", html)
 
     def test_create_proposed_sprints_from_suggested_groups(self) -> None:
         self._write_thought(
