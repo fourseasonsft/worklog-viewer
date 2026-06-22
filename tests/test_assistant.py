@@ -98,6 +98,8 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("Idea Inventory digest to sprint groups", html)
         self.assertIn("Active Idea Inventory", html)
         self.assertIn("digest-grouping-review-modal", html)
+        self.assertIn("review-modal-dialog", html)
+        self.assertIn("digest-modal-footer", html)
         self.assertIn("data-thought-path", html)
         self.assertNotIn("Digest by App/Product", html)
         self.assertNotIn("Proposed Sprint Groups", html)
@@ -261,6 +263,7 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("digest-grouping-review-modal", html)
         self.assertIn("review suggested sprint groups before creating proposals", html.lower())
         self.assertNotIn("new bootstrap.Modal", html)
+        self.assertIn("review-modal-content", html)
 
     def test_create_proposed_sprints_from_suggested_groups(self) -> None:
         self._write_thought(

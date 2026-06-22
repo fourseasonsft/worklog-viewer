@@ -214,6 +214,32 @@
       .quick-capture-form .btn-primary {
         box-shadow: 0 14px 24px rgba(37, 99, 235, 0.22);
       }
+      .review-modal-dialog {
+        width: min(98vw, 1600px);
+        max-width: min(98vw, 1600px);
+        margin: 1rem auto;
+      }
+      .review-modal-content {
+        max-height: calc(100vh - 2rem);
+        display: flex;
+        flex-direction: column;
+      }
+      .review-modal-content .modal-body {
+        overflow-y: auto;
+      }
+      .review-modal-content .modal-footer {
+        position: sticky;
+        bottom: 0;
+        z-index: 2;
+        background: #fff;
+        border-top: 1px solid var(--fsft-border);
+      }
+      .review-table-wrap {
+        max-height: 34vh;
+        overflow-y: auto;
+        border: 1px solid var(--fsft-border);
+        border-radius: 0.75rem;
+      }
     </style>
   </head>
   <body>

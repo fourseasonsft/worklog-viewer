@@ -115,8 +115,8 @@
 </div>
 
 <div class="modal fade d-none" id="digest-grouping-review-modal" tabindex="-1" aria-labelledby="digest-grouping-review-title" aria-hidden="true" style="display:none;">
-  <div class="modal-dialog modal-xl modal-dialog-scrollable modal-dialog-centered">
-    <div class="modal-content">
+  <div class="modal-dialog modal-dialog-scrollable modal-dialog-centered review-modal-dialog">
+    <div class="modal-content review-modal-content">
       <div class="modal-header">
         <div>
           <div class="text-uppercase text-secondary small fw-semibold mb-1">Digest Grouping Review</div>
@@ -136,14 +136,10 @@
                   <div class="small text-secondary text-uppercase fw-semibold">Selected Ideas</div>
                   <div class="h4 mb-0" id="digest-selected-count">{{ digest_preview.selected_idea_count or digest_preview.source_idea_count or digest_preview.active_items|length }}</div>
                 </div>
-                <div class="d-flex flex-wrap gap-2">
-                  <button class="btn btn-primary btn-sm" type="button" id="create-suggested-groups-button">Create Proposed Sprints from Suggested Groups</button>
-                  <button class="btn btn-outline-primary btn-sm" type="button" id="combine-all-button">Combine All Into One Sprint</button>
-                  <button class="btn btn-outline-secondary btn-sm" type="button" id="cancel-grouping-button">Cancel / Return to Inventory</button>
-                </div>
               </div>
             </div>
-            <div class="table-responsive mb-3">
+            <div class="review-table-wrap mb-3">
+              <div class="table-responsive">
               <table class="table inbox-table align-middle mb-0">
                 <thead>
                   <tr>
@@ -169,7 +165,9 @@
                 </tbody>
               </table>
             </div>
-            <div class="table-responsive">
+            </div>
+            <div class="review-table-wrap">
+              <div class="table-responsive">
               <table class="table inbox-table align-middle mb-0">
                 <thead>
                   <tr>
@@ -192,9 +190,15 @@
                 </tbody>
               </table>
             </div>
+            </div>
           {% endif %}
         </div>
         <div id="digest-modal-result" class="alert d-none mt-3 mb-0" role="alert"></div>
+      </div>
+      <div class="modal-footer digest-modal-footer">
+        <button class="btn btn-primary btn-sm" type="button" id="create-suggested-groups-button">Create Proposed Sprints from Suggested Groups</button>
+        <button class="btn btn-outline-primary btn-sm" type="button" id="combine-all-button">Combine All Into One Sprint</button>
+        <button class="btn btn-outline-secondary btn-sm" type="button" id="cancel-grouping-button">Cancel / Return to Inventory</button>
       </div>
     </div>
   </div>
