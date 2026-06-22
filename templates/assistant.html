@@ -400,6 +400,9 @@
   async function finalizeDigest(action) {
     if (!digestPreview) return;
     clearDigestModalResult();
+    [createSuggestedGroupsButton, combineAllButton, cancelGroupingButton].forEach((button) => {
+      if (button) button.disabled = true;
+    });
     const res = await fetch('{{ url_for("assistant_create_proposed_sprints") }}', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -408,16 +411,25 @@
     const data = await res.json();
     if (!res.ok) {
       showDigestModalResult(data.error || 'Failed to create proposed sprints.', 'danger');
+      [createSuggestedGroupsButton, combineAllButton, cancelGroupingButton].forEach((button) => {
+        if (button) button.disabled = false;
+      });
       return;
     }
     if (action === 'cancel') {
       closeDigestModal();
+      [createSuggestedGroupsButton, combineAllButton, cancelGroupingButton].forEach((button) => {
+        if (button) button.disabled = false;
+      });
       return;
     }
     closeDigestModal();
     showDigestResult(data.assistant_reply || 'Proposed sprint groups created.', 'success', [
       '<a class="btn btn-sm btn-outline-primary" href="/sprints?status=proposed">Open Sprint Queue</a>',
     ]);
+    [createSuggestedGroupsButton, combineAllButton, cancelGroupingButton].forEach((button) => {
+      if (button) button.disabled = false;
+    });
     await refreshIdeas();
   }
 

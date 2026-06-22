@@ -1107,6 +1107,61 @@ def _canonical_idea_count(
 ) -> int:
     if canonical_source_ideas is not None:
         return len(_dedupe_text_list([str(item) for item in canonical_source_ideas]))
+
+
+def _sprint_duplicate_key_from_items(items: list[dict[str, object]]) -> str:
+    canonical_items = _canonicalize_source_thoughts([item for item in items if isinstance(item, dict)])
+    parts: list[str] = []
+    thought_ids = sorted({str(_thought_item_fingerprint(item)).strip() for item in canonical_items if str(_thought_item_fingerprint(item)).strip()})
+    if thought_ids:
+        parts.append("ids:" + "|".join(thought_ids))
+    paths = sorted({str(item.get("path") or "").strip() for item in canonical_items if str(item.get("path") or "").strip()})
+    if paths:
+        parts.append("paths:" + "|".join(paths))
+    summaries = sorted({str(item.get("normalized_summary") or item.get("display_snippet") or item.get("title") or "").strip().lower() for item in canonical_items if str(item.get("normalized_summary") or item.get("display_snippet") or item.get("title") or "").strip()})
+    if summaries:
+        parts.append("summaries:" + "|".join(summaries))
+    if not parts and canonical_items:
+        parts.append("titles:" + "|".join(sorted({str(item.get("title") or "").strip().lower() for item in canonical_items if str(item.get("title") or "").strip()})))
+    return "||".join(parts)
+
+
+def _sprint_duplicate_key_from_record(record: dict[str, object]) -> str:
+    parts: list[str] = []
+    summaries = sorted({str(item).strip().lower() for item in (record.get("canonical_source_ideas") or record.get("source_idea_summaries") or record.get("source_ideas") or []) if str(item).strip()})
+    if summaries:
+        parts.append("summaries:" + "|".join(summaries))
+    paths = sorted({str(item).strip() for item in (record.get("source_thought_paths") or []) if str(item).strip()})
+    if paths:
+        parts.append("paths:" + "|".join(paths))
+    ids = sorted({str(item).strip() for item in (record.get("source_thought_ids") or record.get("selected_thought_ids") or []) if str(item).strip()})
+    if ids:
+        parts.append("ids:" + "|".join(ids))
+    if not parts and summaries:
+        parts.append("summaries:" + "|".join(summaries))
+    return "||".join(parts)
+
+
+def _existing_sprint_record_for_duplicate_key(duplicate_key: str) -> dict[str, object] | None:
+    if not duplicate_key:
+        return None
+    for record in _sprint_records():
+        if record.get("status_key") in {"rejected", "rescinded", "deleted"}:
+            continue
+        if _sprint_duplicate_key_from_record(record) == duplicate_key:
+            return record
+    return None
+
+
+def _sprint_summary_signature_from_items(items: list[dict[str, object]]) -> str:
+    canonical_items = _canonicalize_source_thoughts([item for item in items if isinstance(item, dict)])
+    summaries = sorted({str(item.get("normalized_summary") or item.get("display_snippet") or item.get("title") or "").strip().lower() for item in canonical_items if str(item.get("normalized_summary") or item.get("display_snippet") or item.get("title") or "").strip()})
+    return "||".join(summaries)
+
+
+def _sprint_summary_signature_from_record(record: dict[str, object]) -> str:
+    summaries = sorted({str(item).strip().lower() for item in (record.get("canonical_source_ideas") or record.get("source_idea_summaries") or record.get("source_ideas") or []) if str(item).strip() and str(item).strip().lower() != "none"})
+    return "||".join(summaries)
     if source_ideas is not None:
         return len(_dedupe_text_list([str(item) for item in source_ideas]))
     return 0
@@ -1250,13 +1305,20 @@ def _parse_proposed_sprint_record(path: Path) -> dict[str, object]:
             current_section = line[3:].strip().lower()
             continue
         if current_section == "source ideas" and line.startswith("- "):
-            source_ideas.append(line[2:].strip())
+            value = line[2:].strip()
+            if value and value.lower() != "none":
+                source_ideas.append(value)
         elif current_section == "proposed source thoughts" and line.startswith("- "):
-            source_ideas.append(line[2:].strip())
+            value = line[2:].strip()
+            if value and value.lower() != "none":
+                source_ideas.append(value)
         elif current_section == "proposed work" and line.startswith("- "):
-            proposed_work.append(line[2:].strip())
+            value = line[2:].strip()
+            if value and value.lower() != "none":
+                proposed_work.append(value)
     return {
         "id": sprint_id,
+        "sprint_id": sprint_id,
         "proposal_id": meta.get("proposal_id") or path.stem.split("-", 1)[0],
         "intended_sprint_code": meta.get("intended_sprint_code") or meta.get("sprint_code") or "",
         "sprint_group_name": meta.get("sprint_group_name") or path.stem.split("-", 1)[1].replace("-", " ").title(),
@@ -1329,6 +1391,19 @@ def _reject_proposed_sprint_record(record: dict[str, object]) -> Path | None:
 
 
 def _approve_proposed_sprint_record(record: dict[str, object]) -> dict[str, object]:
+    summary_signature = _sprint_summary_signature_from_record(record)
+    existing_approved = None
+    for candidate in _sprint_records():
+        if candidate.get("status_key") != "approved":
+            continue
+        if candidate.get("proposal_id") == record.get("proposal_id") or candidate.get("id") == record.get("proposal_id") or candidate.get("proposal_id") == record.get("id"):
+            existing_approved = candidate
+            break
+        if summary_signature and _sprint_summary_signature_from_record(candidate) == summary_signature:
+            existing_approved = candidate
+            break
+    if existing_approved:
+        return existing_approved
     active_thoughts = _thoughts_by_ids([str(item) for item in record.get("source_thought_ids", []) if str(item).strip()])
     if not active_thoughts:
         active_thoughts = _thoughts_by_paths([str(path) for path in record.get("source_thought_paths", [])])
@@ -1508,6 +1583,7 @@ def _write_sprint_record(group: dict[str, object], status: str = "approved") -> 
             f"# Sprint Queue Record: {title}",
             "",
             f"- sprint_id: {sprint_id}",
+            f"- proposal_id: {group.get('proposal_id') or ''}",
             f"- sprint_code: {sprint_code}",
             f"- app_product: {app_product}",
             f"- sprint_group_name: {title}",
@@ -1587,17 +1663,27 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
             current_section = line[3:].strip().lower()
             continue
         if current_section in {"source ideas", "source thought(s)"} and line.startswith("- "):
-            source_thoughts.append(line[2:].strip())
-            if current_section == "source ideas":
-                source_ideas.append(line[2:].strip())
+            value = line[2:].strip()
+            if value and value.lower() != "none":
+                source_thoughts.append(value)
+                if current_section == "source ideas":
+                    source_ideas.append(value)
         elif current_section == "source thought paths" and line.startswith("- "):
-            source_thought_paths.append(line[2:].strip())
+            value = line[2:].strip()
+            if value and value.lower() != "none":
+                source_thought_paths.append(value)
         elif current_section == "source idea summaries" and line.startswith("- "):
-            source_idea_summaries.append(line[2:].strip())
+            value = line[2:].strip()
+            if value and value.lower() != "none":
+                source_idea_summaries.append(value)
         elif current_section == "digested source ideas" and line.startswith("- "):
-            digested_source_thoughts.append(line[2:].strip())
+            value = line[2:].strip()
+            if value and value.lower() != "none":
+                digested_source_thoughts.append(value)
         elif current_section == "proposed work" and line.startswith("- "):
-            proposed_work.append(line[2:].strip())
+            value = line[2:].strip()
+            if value and value.lower() != "none":
+                proposed_work.append(value)
     handoff_path = meta.get("handoff_path") or ""
     handoff_markdown = ""
     if handoff_path:
@@ -1606,6 +1692,7 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
             handoff_markdown = handoff_file.read_text(encoding="utf-8")
     return {
         "id": sprint_id,
+        "proposal_id": meta.get("proposal_id") or "",
         "sprint_code": meta.get("intended_sprint_code") or meta.get("sprint_code") or sprint_id.upper(),
         "intended_sprint_code": meta.get("intended_sprint_code") or meta.get("sprint_code") or sprint_id.upper(),
         "title": title,
@@ -1752,6 +1839,7 @@ def _regenerate_sprint_handoff_record(record: dict[str, object]) -> tuple[dict[s
             ]
     sprint_group = {
         **record,
+        "sprint_id": record.get("sprint_id") or record.get("id") or "",
         "thoughts": thoughts,
         "source_thoughts": [thought["path"] for thought in thoughts],
         "source_thought_paths": [thought["path"] for thought in thoughts],
@@ -1774,6 +1862,13 @@ def _regenerate_sprint_handoff_record(record: dict[str, object]) -> tuple[dict[s
     sprint_group["path"] = str(sprint_path.relative_to(WORKLOG_ROOT))
     sprint_group["id"] = sprint_group.get("sprint_id")
     return sprint_group, handoff_path, sprint_path
+
+
+def _existing_sprint_record_for_proposal_duplicate(record: dict[str, object]) -> dict[str, object] | None:
+    duplicate_key = _sprint_duplicate_key_from_record(record)
+    if not duplicate_key:
+        return None
+    return _existing_sprint_record_for_duplicate_key(duplicate_key)
 
 
 def _write_sprint_handoff_file(group: dict[str, object]) -> Path:
@@ -2111,15 +2206,14 @@ def _sprint_record_by_id(sprint_id: str) -> dict[str, object] | None:
     for record in _sprint_records():
         if record.get("id") == sprint_id:
             return record
-        if record.get("status_key") == "proposed":
-            proposal_id = str(record.get("proposal_id") or record.get("id") or "").strip()
-            if proposal_id == sprint_id:
-                return record
-            path_stem = Path(str(record.get("path") or "")).stem
-            if path_stem.startswith(sprint_id):
-                return record
-            if sprint_id and proposal_id.startswith(sprint_id):
-                return record
+        proposal_id = str(record.get("proposal_id") or record.get("id") or "").strip()
+        if proposal_id == sprint_id:
+            return record
+        path_stem = Path(str(record.get("path") or "")).stem
+        if path_stem.startswith(sprint_id):
+            return record
+        if sprint_id and proposal_id.startswith(sprint_id):
+            return record
     return None
 
 
@@ -2654,6 +2748,20 @@ def _create_proposed_sprints_from_preview(preview: dict[str, object], mode: str 
         groups = [combined_group]
     created = []
     for group in groups:
+        summary_signature = _sprint_summary_signature_from_items([thought for thought in group.get("thoughts") or [] if isinstance(thought, dict)])
+        existing = next(
+            (
+                record
+                for record in _sprint_records()
+                if record.get("status_key") not in {"rejected", "rescinded", "deleted"}
+                and _sprint_summary_signature_from_record(record) == summary_signature
+                and summary_signature
+            ),
+            None,
+        )
+        if existing:
+            created.append({**existing, "_existing_duplicate": True})
+            continue
         proposal = _proposal_from_digest_group(group)
         record_path = _write_proposed_sprint_record(proposal)
         proposal["path"] = str(record_path.relative_to(WORKLOG_ROOT))
@@ -3414,6 +3522,8 @@ def sprint_action(sprint_id: str):
         regenerated, handoff_path, sprint_path = _regenerate_sprint_handoff_record(record)
         new_path = sprint_path
     elif action == "approve":
+        if record.get("status_key") == "approved":
+            return redirect(url_for("sprint_detail", sprint_id=record["id"]))
         if record.get("status_key") != "proposed":
             abort(400)
         approved_record = _approve_proposed_sprint_record(record)
@@ -3629,12 +3739,18 @@ def assistant_create_proposed_sprints():
         created_proposals = _create_proposed_sprints_from_preview(preview, "suggested")
     created_sprints = [{"proposal_id": proposal["proposal_id"], "sprint_code": proposal["sprint_code"], "path": proposal.get("path")} for proposal in created_proposals]
     sprint_detail_urls = [url_for("sprint_detail", sprint_id=proposal["proposal_id"]) for proposal in created_proposals]
+    duplicate_existing = next((proposal for proposal in created_proposals if proposal.get("_existing_duplicate")), None)
     return {
         "ok": True,
         "created_proposed_sprints": created_sprints,
         "sprint_detail_urls": sprint_detail_urls,
         "sprint_queue_url": url_for("sprints", status="proposed"),
-        "assistant_reply": "Proposed sprint groups created. Review them in Sprint Queue.",
+        "assistant_reply": (
+            "A sprint already exists for these ideas."
+            if duplicate_existing
+            else "Proposed sprint groups created. Review them in Sprint Queue."
+        ),
+        "existing_sprint_url": sprint_detail_urls[0] if duplicate_existing and sprint_detail_urls else "",
     }
 
 

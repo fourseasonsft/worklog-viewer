@@ -74,6 +74,11 @@ class WorklogSprintQueueTests(unittest.TestCase):
             }
         return client
 
+    def _write_thought(self, name: str, body: str) -> Path:
+        path = self.root / "04-inbox/thought-box" / name
+        path.write_text(body, encoding="utf-8")
+        return path
+
     def _create_sprint_record(self, status: str, app_product: str = "IMS", title: str = "IMS Sprint") -> Path:
         sprint_code = f"{viewer_app._sprint_code_prefix(app_product)}-SPRINT-20260620-001"
         path = self.root / f"06-sprints/{status}/sp-20260620120000-{status}-{title.lower().replace(' ', '-')}.md"
@@ -372,6 +377,90 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertEqual(approved["sprint_code"], before)
         self.assertTrue(list((self.root / "06-sprints/approved").glob("*.md")))
         self.assertFalse(list((self.root / "06-sprints/proposed").glob("*.md")))
+
+    def test_same_proposed_create_request_returns_existing_sprint(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-worklog-idempotent.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Worklog needs a calmer inbox queue.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Worklog needs a calmer inbox queue.\n",
+        )
+        client = self._client()
+        preview = viewer_app._digest_preview([item for item in viewer_app._thought_box_items(digested_only=False) if item["path"].endswith("worklog-idempotent.md")])
+        first = client.post("/api/assistant/create-proposed-sprints", json={"digest_preview": preview, "action": "accept_suggested"})
+        self.assertEqual(first.status_code, 200)
+        second = client.post("/api/assistant/create-proposed-sprints", json={"digest_preview": preview, "action": "accept_suggested"})
+        self.assertEqual(second.status_code, 200)
+        body = second.get_json()
+        self.assertIn("A sprint already exists for these ideas.", body["assistant_reply"])
+        proposed_records = [record for record in viewer_app._proposed_sprint_records() if str(record.get("status") or "").lower() == "proposed"]
+        self.assertEqual(len(proposed_records), 1)
+
+    def test_combine_all_double_submit_creates_one_proposal(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-worklog-combine.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Worklog needs a calmer inbox queue.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Worklog needs a calmer inbox queue.\n",
+        )
+        client = self._client()
+        preview = viewer_app._digest_preview([item for item in viewer_app._thought_box_items(digested_only=False) if item["path"].endswith("worklog-combine.md")])
+        first = client.post("/api/assistant/create-proposed-sprints", json={"digest_preview": preview, "action": "combine_all"})
+        self.assertEqual(first.status_code, 200)
+        second = client.post("/api/assistant/create-proposed-sprints", json={"digest_preview": preview, "action": "combine_all"})
+        self.assertEqual(second.status_code, 200)
+        self.assertIn("A sprint already exists for these ideas.", second.get_json()["assistant_reply"])
+        self.assertEqual(len(viewer_app._proposed_sprint_records()), 1)
+
+    def test_suggested_group_double_submit_creates_one_proposal(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-worklog-suggested.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Worklog needs a calmer inbox queue.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Worklog needs a calmer inbox queue.\n",
+        )
+        client = self._client()
+        preview = viewer_app._digest_preview([item for item in viewer_app._thought_box_items(digested_only=False) if item["path"].endswith("worklog-suggested.md")])
+        first = client.post("/api/assistant/create-proposed-sprints", json={"digest_preview": preview, "action": "accept_suggested"})
+        self.assertEqual(first.status_code, 200)
+        second = client.post("/api/assistant/create-proposed-sprints", json={"digest_preview": preview, "action": "accept_suggested"})
+        self.assertEqual(second.status_code, 200)
+        self.assertIn("A sprint already exists for these ideas.", second.get_json()["assistant_reply"])
+        self.assertEqual(len(viewer_app._proposed_sprint_records()), 1)
+
+    def test_approve_same_proposal_twice_does_not_duplicate(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-worklog-approve.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Worklog needs a calmer inbox queue.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Worklog needs a calmer inbox queue.\n",
+        )
+        client = self._client()
+        preview = viewer_app._digest_preview([item for item in viewer_app._thought_box_items(digested_only=False) if item["path"].endswith("worklog-approve.md")])
+        created = client.post("/api/assistant/create-proposed-sprints", json={"digest_preview": preview, "action": "accept_suggested"})
+        self.assertEqual(created.status_code, 200)
+        proposal = viewer_app._proposed_sprint_records()[0]
+        first = client.post(f"/sprints/{proposal['proposal_id']}/action", data={"action": "approve"}, follow_redirects=True)
+        self.assertEqual(first.status_code, 200)
+        second = client.post(f"/sprints/{proposal['proposal_id']}/action", data={"action": "approve"}, follow_redirects=True)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(len([record for record in viewer_app._sprint_records() if record["status_key"] == "approved"]), 1)
+
+    def test_duplicate_detection_spans_proposed_and_approved_records(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-worklog-dup.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Worklog needs a calmer inbox queue.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Worklog needs a calmer inbox queue.\n",
+        )
+        client = self._client()
+        preview = viewer_app._digest_preview([item for item in viewer_app._thought_box_items(digested_only=False) if item["path"].endswith("worklog-dup.md")])
+        created = client.post("/api/assistant/create-proposed-sprints", json={"digest_preview": preview, "action": "accept_suggested"})
+        self.assertEqual(created.status_code, 200)
+        proposal = viewer_app._proposed_sprint_records()[0]
+        client.post(f"/sprints/{proposal['proposal_id']}/action", data={"action": "approve"}, follow_redirects=True)
+        response = client.post("/api/assistant/create-proposed-sprints", json={"digest_preview": preview, "action": "accept_suggested"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("A sprint already exists for these ideas.", response.get_json()["assistant_reply"])
+        self.assertEqual(len([record for record in viewer_app._sprint_records() if record["status_key"] == "approved"]), 1)
+
+    def test_regenerate_handoff_does_not_create_duplicate_sprint(self) -> None:
+        self._create_sprint_record("approved")
+        client = self._client()
+        before = len(viewer_app._sprint_records())
+        response = client.post("/sprints/sp-20260620120000-approved/action", data={"action": "regenerate_handoff"}, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(viewer_app._sprint_records()), before)
 
     def test_proposed_rejection_keeps_sources_active(self) -> None:
         self._create_proposed_sprint_record()
