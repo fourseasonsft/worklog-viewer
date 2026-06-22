@@ -118,6 +118,52 @@ class WorklogSprintQueueTests(unittest.TestCase):
         )
         return path
 
+    def _create_proposed_sprint_record(self, title: str = "IMS Proposed", app_product: str = "IMS") -> Path:
+        sprint_code = f"{viewer_app._sprint_code_prefix(app_product)}-SPRINT-20260620-001"
+        (self.root / "04-inbox/thought-box/ims-ui.md").write_text(
+            "# IMS UI\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Improve the IMS queue surface.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: Improve the IMS queue surface.\n",
+            encoding="utf-8",
+        )
+        (self.root / "04-inbox/thought-box/worklog-queue.md").write_text(
+            "# Worklog Queue\n\n- created_at: 2026-06-20T10:00:01Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Tighten Worklog queue filtering.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Tighten Worklog queue filtering.\n",
+            encoding="utf-8",
+        )
+        path = self.root / f"06-sprints/proposed/pr-20260620120000-{title.lower().replace(' ', '-')}.md"
+        path.write_text(
+            "\n".join(
+                [
+                    f"# Proposed Sprint Group: {title}",
+                    "",
+                    "- proposal_id: pr-20260620120000-001",
+                    f"- sprint_group_name: {title}",
+                    f"- app_product: {app_product}",
+                    "- scope: Small",
+                    "- status: proposed",
+                    "- created_at: 2026-06-20T12:00:00Z",
+                    "- updated_at: 2026-06-20T12:30:00Z",
+                    "- source_thought_ids: thought-1, thought-2",
+                    "- source_thought_paths: 04-inbox/thought-box/ims-ui.md, 04-inbox/thought-box/worklog-queue.md",
+                    "",
+                    "## Source Ideas",
+                    "- Improve the IMS queue surface.",
+                    "- Tighten Worklog queue filtering.",
+                    "",
+                    "## Proposed Work",
+                    "- Improve the IMS queue surface.",
+                    "- Tighten Worklog queue filtering.",
+                    "",
+                    "## Recommended First Step",
+                    "Review the source ideas.",
+                    "",
+                    "## Handoff Preview",
+                    "# Sprint Handoff Preview",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return path
+
     def test_sprint_queue_page_renders(self) -> None:
         self._create_sprint_record("approved")
         html = self._client().get("/sprints").get_data(as_text=True)
@@ -126,6 +172,13 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("IMS Sprint", html)
         self.assertIn("Start Sprint", html)
         self.assertIn("onchange=\"this.form.requestSubmit()\"", html)
+
+    def test_proposed_filter_renders_proposed_rows(self) -> None:
+        self._create_proposed_sprint_record()
+        html = self._client().get("/sprints?status=proposed").get_data(as_text=True)
+        self.assertIn("IMS Proposed", html)
+        self.assertIn("Approve", html)
+        self.assertIn("Reject", html)
 
     def test_generated_sprint_code_is_unique(self) -> None:
         self._create_sprint_record("approved", app_product="IMS", title="IMS Sprint 1")
@@ -184,6 +237,25 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         shipped_path = self.root / "06-sprints/shipped/sp-20260620120000-approved-ims-sprint.md"
         self.assertTrue(shipped_path.exists())
+
+    def test_proposed_approval_moves_to_approved_and_digests_sources(self) -> None:
+        self._create_proposed_sprint_record()
+        client = self._client()
+        record_id = viewer_app._sprint_records()[0]["id"]
+        response = client.post(f"/sprints/{record_id}/action", data={"action": "approve"}, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(list((self.root / "06-sprints/approved").glob("*.md")))
+        self.assertFalse(list((self.root / "06-sprints/proposed").glob("*.md")))
+
+    def test_proposed_rejection_keeps_sources_active(self) -> None:
+        self._create_proposed_sprint_record()
+        client = self._client()
+        record_id = viewer_app._sprint_records()[0]["id"]
+        response = client.post(f"/sprints/{record_id}/action", data={"action": "reject"}, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(list((self.root / "06-sprints/rejected").glob("*.md")))
+        self.assertFalse(list((self.root / "04-inbox/thought-box/digested").glob("*.md")))
+        self.assertTrue((self.root / "06-sprints/proposed").exists())
 
     def test_completion_update_by_code_works(self) -> None:
         self._create_sprint_record("approved")

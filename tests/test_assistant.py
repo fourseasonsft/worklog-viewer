@@ -97,9 +97,9 @@ class WorklogAssistantTests(unittest.TestCase):
         html = response.get_data(as_text=True)
         self.assertIn("Idea Inventory digest to sprint groups", html)
         self.assertIn("Active Idea Inventory", html)
-        self.assertIn("Digest by App/Product", html)
-        self.assertIn("Proposed Sprint Groups", html)
-        self.assertIn("Approved Sprint Queue", html)
+        self.assertNotIn("Digest by App/Product", html)
+        self.assertNotIn("Proposed Sprint Groups", html)
+        self.assertNotIn("Approved Sprint Queue", html)
         self.assertIn("Digest Selected", html)
         self.assertIn("select-all-ideas", html)
         self.assertNotIn("Inventory Actions", html)
@@ -124,7 +124,7 @@ class WorklogAssistantTests(unittest.TestCase):
             "# Clean Thought\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: 2026-06-20 10:00 Please tighten the IMS table.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: Please tighten the IMS table.\n",
         )
         item = viewer_app._thought_box_items(digested_only=False)[0]
-        self.assertRegex(item["created_display"], r"2026-06-20 \d{2}:\d{2}")
+        self.assertRegex(item["created_display"], r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}")
         self.assertNotIn("2026-06-20 10:00", item["display_snippet"])
         self.assertEqual(item["raw_text_full"], "2026-06-20 10:00 Please tighten the IMS table.")
 
@@ -150,7 +150,7 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertEqual(before, after)
         self.assertTrue(thought.exists())
         html = response.get_data(as_text=True)
-        self.assertIn("Sprint Groups", html)
+        self.assertIn("Digest Preview", html)
 
     def test_digest_selected_only_includes_selected_ideas(self) -> None:
         self._write_thought(
@@ -210,8 +210,8 @@ class WorklogAssistantTests(unittest.TestCase):
         )
         html = self._client().get("/assistant?digest_preview=1").get_data(as_text=True)
         self.assertIn("<table", html)
-        self.assertIn("Digest by App/Product", html)
-        self.assertIn("Sprint Groups", html)
+        self.assertIn("Digest Preview", html)
+        self.assertIn("Review them in Sprint Queue", html)
 
     def test_approve_digest_creates_handoffs_and_moves_thoughts(self) -> None:
         self._write_thought(
@@ -229,6 +229,7 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertTrue(body["created_handoffs"])
         self.assertTrue(body["moved_thoughts"])
         self.assertTrue(body["created_sprints"])
+        self.assertTrue(body["assistant_reply"].startswith("Proposed sprint groups created"))
         handoff_files = list((self.root / "05-sprint-handoffs").glob("*.md"))
         self.assertTrue(handoff_files)
         handoff_text = next(path for path in handoff_files if "# Sprint Handoff:" in path.read_text(encoding="utf-8")).read_text(encoding="utf-8")
@@ -313,7 +314,7 @@ class WorklogAssistantTests(unittest.TestCase):
         body = response.get_json()
         self.assertTrue(body["created_sprints"])
         self.assertTrue(body["created_handoffs"])
-        self.assertTrue(body["sprint_queue_url"].endswith("/sprints"))
+        self.assertTrue(body["sprint_queue_url"].endswith("/sprints?status=proposed"))
         self.assertTrue(body["sprint_detail_urls"])
         self.assertTrue(body["handoff_urls"])
         queue_files = list((self.root / "06-sprints/approved").glob("*.md"))
@@ -329,6 +330,7 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertTrue(any("Sprint Code" in path.read_text(encoding="utf-8") for path in queue_files))
         queue_html = self._client().get("/sprints").get_data(as_text=True)
         self.assertIn("approved", queue_html.lower())
+        self.assertTrue(body["assistant_reply"].startswith("Proposed sprint groups created"))
         detail_html = self._client().get(body["sprint_detail_urls"][0]).get_data(as_text=True)
         self.assertIn("Sprint Code", detail_html)
         self.assertIn("Source Ideas", detail_html)
