@@ -234,6 +234,22 @@ def _format_local_timestamp(dt: datetime | None = None) -> str:
     return _format_pacific_timestamp(dt)
 
 
+def _format_pacific_date_short(value: datetime | None) -> str:
+    if value is None:
+        return "Unknown"
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(PACIFIC_TZ).strftime("%m/%d/%y")
+
+
+def _clean_thought_title(value: str) -> str:
+    cleaned = str(value or "").strip()
+    cleaned = re.sub(r"^\d{4}[- ]\d{2}[- ]\d{2}(?:[- ]\d{2}[- ]\d{2}(?:[- ]\d{2})?)?[- ]*", "", cleaned)
+    cleaned = cleaned.replace("-", " ")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned or "Untitled Thought"
+
+
 def _format_pacific_timestamp(value: datetime | str | None) -> str:
     if value is None:
         return "Unknown"
@@ -358,6 +374,27 @@ def _app_slug_from_title(title: str) -> str:
 
 def _parse_active_work_file(relative_path: str, title: str) -> dict[str, object]:
     source_path = WORKLOG_ROOT / relative_path
+    if not source_path.exists():
+        return {
+            "title": title,
+            "slug": _app_slug_from_title(title),
+            "path": relative_path,
+            "current_sprint_name": "",
+            "current_sprint_status": "Stable",
+            "current_sprint_percent": "",
+            "current_sprint_notes": "",
+            "has_active_sprint": False,
+            "last_sprint_name": "",
+            "last_sprint_completed": "Not recorded",
+            "last_sprint_outcome": "No completion note recorded.",
+            "next_suggested_sprint_name": "",
+            "next_suggested_sprint_why": "",
+            "next_suggested_sprint_first_step": "",
+            "blockers_text": "",
+            "blockers_count": 0,
+            "last_updated": "Unknown",
+            "inbox_items": [],
+        }
     text = source_path.read_text(encoding="utf-8")
     current_sprint = _section_key_value_metadata(text, "Current Sprint")
     legacy_current_focus = _extract_section_text(text, "Current Sprint / Focus")
@@ -568,6 +605,32 @@ def _recent_inbox_items(limit: int = 8) -> list[dict[str, object]]:
     for folder in INBOX_FOLDERS:
         for path in _relative_md_files(f"04-inbox/{folder}"):
             items.append(_parse_inbox_item(path))
+    items.sort(key=lambda item: (item["mtime"], item["path"]), reverse=True)
+    return items[:limit]
+
+
+def _recent_worklog_pages(limit: int = 5) -> list[dict[str, object]]:
+    candidate_dirs = [
+        WORKLOG_ROOT / "00-dashboard",
+        WORKLOG_ROOT / "01-daily-logs",
+        WORKLOG_ROOT / "03-active-work",
+        WORKLOG_ROOT / "05-release-notes",
+        WORKLOG_ROOT / "11-runbooks",
+    ]
+    items: list[dict[str, object]] = []
+    for directory in candidate_dirs:
+        if not directory.exists():
+            continue
+        for path in directory.rglob("*.md"):
+            if any(part in {"archived", "digested", "proposed", "rescinded", "deleted"} for part in path.parts):
+                continue
+            items.append(
+                {
+                    "title": path.stem.replace("-", " ").title(),
+                    "path": str(path.relative_to(WORKLOG_ROOT)),
+                    "mtime": _file_mtime(path),
+                }
+            )
     items.sort(key=lambda item: (item["mtime"], item["path"]), reverse=True)
     return items[:limit]
 
@@ -1740,6 +1803,8 @@ def _parse_thought_file(path: Path) -> dict[str, str]:
     current = None
     raw_section_lines: list[str] = []
     for line in text.splitlines():
+        if line.startswith("# ") and not data.get("title"):
+            data["title"] = line[2:].strip()
         if line.startswith("- "):
             if ":" in line[2:]:
                 key, value = line[2:].split(":", 1)
@@ -1752,6 +1817,7 @@ def _parse_thought_file(path: Path) -> dict[str, str]:
             if current == "raw_thought":
                 raw_section_lines.append(line.strip())
     data["title"] = data.get("title") or path.stem.replace("-", " ").title()
+    data["display_title"] = _clean_thought_title(data["title"])
     raw_text_full = data.get("raw_thought") or data.get("raw_text") or data.get("raw") or "\n".join(raw_section_lines)
     data["raw_text_full"] = raw_text_full.strip()
     data["raw_text"] = data["raw_text_full"]
@@ -1765,7 +1831,16 @@ def _parse_thought_file(path: Path) -> dict[str, str]:
         raw_lines.append(cleaned)
     data["display_snippet"] = " ".join(raw_lines[:3]).strip()
     data["normalized_summary"] = _normalize_idea_summary(data["raw_text_full"], data["title"], data["path"])
-    data["created_display"] = _format_local_timestamp(datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc))
+    created_at_value = data.get("created_at") or data.get("created") or ""
+    created_dt: datetime | None = None
+    if created_at_value:
+        try:
+            created_dt = datetime.fromisoformat(str(created_at_value).replace("Z", "+00:00"))
+        except ValueError:
+            created_dt = None
+    created_dt = created_dt or datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    data["created_display"] = _format_pacific_date_short(created_dt)
+    data["created_full_display"] = _format_local_timestamp(created_dt)
     data["thought_id"] = data.get("thought_fingerprint") or hashlib.sha256(data.get("raw_text_full", "").strip().encode("utf-8")).hexdigest()[:16]
     return data
 
@@ -1781,6 +1856,38 @@ def _thought_box_items(digested_only: bool | None = None) -> list[dict[str, str]
             continue
         items.append(item)
     return items
+
+
+def _update_thought_file(path: Path, updates: dict[str, str]) -> None:
+    item = _parse_thought_file(path)
+    title = updates.get("title") or item.get("title") or path.stem.replace("-", " ").title()
+    raw_text = updates.get("raw_text") if updates.get("raw_text") is not None else item.get("raw_text_full") or ""
+    ai_inferred_app = updates.get("ai_inferred_app") or item.get("ai_inferred_app") or "Other"
+    ai_inferred_type = updates.get("ai_inferred_type") or item.get("ai_inferred_type") or "feature"
+    ai_summary = updates.get("ai_summary") or item.get("ai_summary") or item.get("normalized_summary") or raw_text
+    created_at = updates.get("created_at") or item.get("created_at") or item.get("created") or ""
+    source = updates.get("source") or item.get("source") or "David"
+    thought_fingerprint = updates.get("thought_fingerprint") or item.get("thought_fingerprint") or ""
+    source_inbox_path = updates.get("source_inbox_path") or item.get("source_inbox_path") or ""
+    lines = [
+        f"# {title}",
+        "",
+        f"- created_at: {created_at}" if created_at else None,
+        f"- source: {source}",
+        f"- source_inbox_path: {source_inbox_path}" if source_inbox_path else None,
+        f"- status: {updates.get('status') or item.get('status') or 'raw'}",
+        f"- digest_status: {updates.get('digest_status') or item.get('digest_status') or 'not_digested'}",
+        f"- thought_fingerprint: {thought_fingerprint}" if thought_fingerprint else None,
+        f"- raw_text: {raw_text}",
+        f"- ai_inferred_app: {ai_inferred_app}",
+        f"- ai_inferred_type: {ai_inferred_type}",
+        f"- ai_summary: {ai_summary}",
+        "",
+        "## Raw Thought",
+        raw_text,
+        "",
+    ]
+    path.write_text("\n".join(line for line in lines if line is not None), encoding="utf-8")
 
 
 def _move_thought(path: Path, destination_dir: Path) -> Path:
@@ -2978,6 +3085,7 @@ def _require_worklog_session(view):
 def inject_globals() -> dict[str, object]:
     return {
         "nav_items": _nav_items(),
+        "recent_worklog_pages": _recent_worklog_pages(),
         "content_root": str(WORKLOG_ROOT),
         "now_utc": None,
         "is_authenticated": _is_authenticated(),
@@ -3175,6 +3283,27 @@ def assistant():
         openai_enabled=_openai_available(),
         idea_inventory_count=len(_thought_box_items(digested_only=False)),
     )
+
+
+@app.route("/assistant/thought/<path:relative_path>", methods=["GET", "POST"])
+@_require_worklog_session
+def thought_detail(relative_path: str):
+    path = _resolve_worklog_path(relative_path)
+    if not str(path).startswith(str(THOUGHT_BOX_DIR)):
+        abort(404)
+    if request.method == "POST":
+        updates = {
+            "title": (request.form.get("title") or "").strip(),
+            "ai_inferred_app": (request.form.get("ai_inferred_app") or "").strip() or None,
+            "ai_inferred_type": (request.form.get("ai_inferred_type") or "").strip() or None,
+            "raw_text": (request.form.get("raw_text") or "").strip(),
+            "ai_summary": (request.form.get("ai_summary") or "").strip() or None,
+        }
+        _update_thought_file(path, {key: value for key, value in updates.items() if value is not None})
+        flash("Idea details updated.", "success")
+        return redirect(url_for("thought_detail", relative_path=relative_path))
+    item = _parse_thought_file(path)
+    return render_template("thought_detail.html", thought=item)
 
 
 @app.route("/sprints", methods=["GET"])

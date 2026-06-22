@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="worklog-shell">
+  <section class="card surface-card card-shadow border-0 mb-4">
+    <div class="card-body p-4 p-xl-5">
+      <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-start mb-3">
+        <div>
+          <div class="text-uppercase text-secondary small fw-semibold mb-2">Idea Detail</div>
+          <h1 class="h3 mb-1">{{ thought.display_title or thought.title }}</h1>
+          <div class="text-secondary">Edit the inferred app/product and other low-risk details without changing the active workflow.</div>
+        </div>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('assistant') }}">Back to Idea Inventory</a>
+      </div>
+      <div class="row g-3 mb-4">
+        <div class="col-12 col-md-3">
+          <div class="priority-card">
+            <div class="text-secondary small text-uppercase fw-semibold">Created</div>
+            <div class="fw-semibold">{{ thought.created_full_display or thought.created_display or 'Unknown' }}</div>
+          </div>
+        </div>
+        <div class="col-12 col-md-3">
+          <div class="priority-card">
+            <div class="text-secondary small text-uppercase fw-semibold">Digest Status</div>
+            <div class="fw-semibold">{{ thought.digest_status or 'not_digested' }}</div>
+          </div>
+        </div>
+        <div class="col-12 col-md-3">
+          <div class="priority-card">
+            <div class="text-secondary small text-uppercase fw-semibold">Status</div>
+            <div class="fw-semibold">{{ thought.status or 'raw' }}</div>
+          </div>
+        </div>
+        <div class="col-12 col-md-3">
+          <div class="priority-card">
+            <div class="text-secondary small text-uppercase fw-semibold">Source</div>
+            <div class="fw-semibold">{{ thought.source or 'David' }}</div>
+          </div>
+        </div>
+      </div>
+      <form method="post" class="row g-3">
+        <div class="col-12 col-md-6">
+          <label class="form-label fw-semibold" for="title">Title</label>
+          <input class="form-control" id="title" name="title" value="{{ thought.title }}">
+        </div>
+        <div class="col-12 col-md-6">
+          <label class="form-label fw-semibold" for="ai_inferred_app">Inferred App/Product</label>
+          <input class="form-control" id="ai_inferred_app" name="ai_inferred_app" value="{{ thought.ai_inferred_app or 'Other' }}">
+        </div>
+        <div class="col-12 col-md-4">
+          <label class="form-label fw-semibold" for="ai_inferred_type">Inferred Type</label>
+          <input class="form-control" id="ai_inferred_type" name="ai_inferred_type" value="{{ thought.ai_inferred_type or 'feature' }}">
+        </div>
+        <div class="col-12 col-md-8">
+          <label class="form-label fw-semibold" for="ai_summary">Summary</label>
+          <input class="form-control" id="ai_summary" name="ai_summary" value="{{ thought.ai_summary or thought.normalized_summary or '' }}">
+        </div>
+        <div class="col-12">
+          <label class="form-label fw-semibold" for="raw_text">Raw Thought</label>
+          <textarea class="form-control" id="raw_text" name="raw_text" rows="8">{{ thought.raw_text_full }}</textarea>
+        </div>
+        <div class="col-12 d-flex flex-wrap gap-2">
+          <button class="btn btn-primary" type="submit">Save Changes</button>
+          <a class="btn btn-outline-secondary" href="{{ url_for('assistant') }}">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </section>
+</div>
+{% endblock %}

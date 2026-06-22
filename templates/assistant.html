@@ -79,9 +79,9 @@
                   <td>
                     <input class="form-check-input idea-select" type="checkbox" value="{{ item.thought_id }}" data-thought-id="{{ item.thought_id }}" data-thought-path="{{ item.path }}">
                   </td>
-                  <td class="text-nowrap">{{ item.created_at | display_timestamp if item.created_at else item.mtime_display or 'Unknown' }}</td>
+                  <td class="text-nowrap">{{ item.created_display or item.mtime_display or 'Unknown' }}</td>
                   <td>
-                    <div class="fw-semibold">{{ item.title }}</div>
+                    <div class="fw-semibold">{{ item.display_title or item.title }}</div>
                     <div class="text-secondary small">{{ item.raw_text[:180] if item.raw_text else 'No raw text recorded.' }}</div>
                   </td>
                   <td>
@@ -95,6 +95,7 @@
                   <td>
                     <div class="d-flex flex-wrap gap-2">
                       <a class="btn btn-outline-primary btn-sm" href="{{ url_for('view_file', relative_path=item.path) }}">View</a>
+                      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('thought_detail', relative_path=item.path) }}">Edit</a>
                       <button class="btn btn-outline-secondary btn-sm archive-button" type="button" data-thought-path="{{ item.path }}">Archive</button>
                     </div>
                   </td>
@@ -297,9 +298,9 @@
     const sourceRows = sourceItems.length
       ? sourceItems.map((item) => `
           <tr>
-            <td class="text-nowrap">${item.created_display || item.created_at || item.mtime_display || 'Unknown'}</td>
+            <td class="text-nowrap">${item.created_display || item.mtime_display || 'Unknown'}</td>
             <td>
-              <div class="fw-semibold">${item.title || ''}</div>
+              <div class="fw-semibold">${item.display_title || item.title || ''}</div>
               <div class="text-secondary small">${item.display_snippet || item.normalized_summary || 'No raw text recorded.'}</div>
             </td>
             <td><span class="badge text-bg-light border">${item.ai_inferred_app || 'Other'}</span></td>
@@ -402,9 +403,9 @@
         toggleIdeaRow(row);
       });
       row.innerHTML = `
-        <td class="text-nowrap">${item.created_display || item.created_at || item.mtime_display || 'Unknown'}</td>
+        <td class="text-nowrap">${item.created_display || item.mtime_display || 'Unknown'}</td>
         <td>
-          <div class="fw-semibold">${item.title || ''}</div>
+          <div class="fw-semibold">${item.display_title || item.title || ''}</div>
           <div class="text-secondary small">${item.display_snippet || 'No raw text recorded.'}</div>
         </td>
         <td><span class="badge text-bg-light border">${item.ai_inferred_app || 'Other'}</span></td>

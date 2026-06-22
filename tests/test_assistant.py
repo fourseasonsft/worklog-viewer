@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -144,7 +146,7 @@ class WorklogAssistantTests(unittest.TestCase):
             "# Clean Thought\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: 2026-06-20 10:00 Please tighten the IMS table.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: Please tighten the IMS table.\n",
         )
         item = viewer_app._thought_box_items(digested_only=False)[0]
-        self.assertRegex(item["created_display"], r"\d{4}-\d{2}-\d{2} \d{1,2}:\d{2} (AM|PM) P[DS]T")
+        self.assertRegex(item["created_display"], r"\d{2}/\d{2}/\d{2}")
         self.assertNotIn("2026-06-20 10:00", item["display_snippet"])
         self.assertEqual(item["raw_text_full"], "2026-06-20 10:00 Please tighten the IMS table.")
 
@@ -297,6 +299,10 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("review-modal-content", html)
         self.assertIn("digest-preview-body", html)
         self.assertIn("digest-modal-result", html)
+
+    def test_recent_worklog_pages_shortcut_renders(self) -> None:
+        html = self._client().get("/assistant").get_data(as_text=True)
+        self.assertIn("Recent Pages", html)
 
     def test_create_proposed_sprints_from_suggested_groups(self) -> None:
         self._write_thought(
@@ -583,6 +589,70 @@ class WorklogAssistantTests(unittest.TestCase):
     def test_no_thoughts_empty_state_works(self) -> None:
         html = self._client().get("/assistant").get_data(as_text=True)
         self.assertIn("No active raw ideas yet.", html)
+
+    def test_idea_inventory_uses_short_date_and_clean_title(self) -> None:
+        self._write_thought(
+            "2026-06-22-170407-make-idea-rows-click-to-select.md",
+            "# Make idea rows click to select\n\n- created_at: 2026-06-22T17:04:07.028190+00:00\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Make idea rows click to select.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Make idea rows click to select.\n",
+        )
+        html = self._client().get("/assistant").get_data(as_text=True)
+        self.assertIn("06/22/26", html)
+        self.assertIn("Make idea rows click to select", html)
+        self.assertNotIn(">170407 Make Idea Rows Click To Select<", html)
+
+    def test_thought_detail_can_edit_inferred_app_and_preserves_metadata(self) -> None:
+        path = self._write_thought(
+            "2026-06-22-170407-edit-me.md",
+            "# Edit Me\n\n- created_at: 2026-06-22T17:04:07.028190+00:00\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Worklog needs a new shortcut.\n- ai_inferred_app: Other\n- ai_inferred_type: feature\n- ai_summary: Worklog needs a new shortcut.\n",
+        )
+        response = self._client().post(
+            f"/assistant/thought/{path.relative_to(self.root)}",
+            data={
+                "title": "Edit Me",
+                "ai_inferred_app": "Worklog",
+                "ai_inferred_type": "feature",
+                "ai_summary": "Worklog needs a new shortcut.",
+                "raw_text": "Worklog needs a new shortcut.",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("- created_at: 2026-06-22T17:04:07.028190+00:00", text)
+        self.assertIn("- status: raw", text)
+        self.assertIn("- digest_status: not_digested", text)
+        self.assertIn("- ai_inferred_app: Worklog", text)
+        self.assertIn("Worklog needs a new shortcut.", text)
+        html = response.get_data(as_text=True)
+        self.assertIn("Idea details updated.", html)
+
+    def test_daily_log_helper_creates_and_preserves_existing_file(self) -> None:
+        helper = Path("/opt/fsftdev/fsft-worklog/scripts/create_daily_log.py")
+        self.assertTrue(helper.exists())
+        env = os.environ.copy()
+        env["WORKLOG_ROOT"] = str(self.root)
+        template = self.root / "templates/daily-log-template.md"
+        template.parent.mkdir(parents=True, exist_ok=True)
+        template.write_text("# Daily Log\\n\\n## Summary\\n\\n{{ date }}\\n", encoding="utf-8")
+        result = subprocess.run(
+            ["/opt/fsftdev/worklog-viewer/.venv/bin/python", str(helper), "2026-06-22"],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+        created = self.root / "01-daily-logs/2026/06/2026-06-22.md"
+        self.assertTrue(created.exists())
+        self.assertIn("2026-06-22", created.read_text(encoding="utf-8"))
+        result2 = subprocess.run(
+            ["/opt/fsftdev/worklog-viewer/.venv/bin/python", str(helper), "2026-06-22"],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        self.assertNotEqual(result2.returncode, 0)
 
 
 if __name__ == "__main__":
