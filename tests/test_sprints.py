@@ -135,6 +135,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
                     f"# Proposed Sprint Group: {title}",
                     "",
                     "- proposal_id: pr-20260620120000-001",
+                    f"- intended_sprint_code: {sprint_code}",
                     f"- sprint_group_name: {title}",
                     f"- app_product: {app_product}",
                     "- scope: Small",
@@ -157,6 +158,13 @@ class WorklogSprintQueueTests(unittest.TestCase):
                     "",
                     "## Handoff Preview",
                     "# Sprint Handoff Preview",
+                    "",
+                    "## Sprint Code",
+                    sprint_code,
+                    "",
+                    "## Source Ideas",
+                    "- Improve the IMS queue surface.",
+                    "- Tighten Worklog queue filtering.",
                     "",
                 ]
             ),
@@ -198,7 +206,22 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("Back to Sprint Queue", html)
         self.assertIn("<details", html)
         self.assertIn("Debug metadata", html)
-        self.assertIn("Handoff Preview", html.split("Debug metadata")[0])
+        visible = html.split("Debug metadata")[0]
+        self.assertIn("Handoff Preview", visible)
+        self.assertIn("Sprint Code", visible)
+        self.assertIn("WL-SPRINT-20260620-001", visible)
+        self.assertIn("Improve the IMS queue surface.", visible)
+        self.assertIn("Tighten Worklog queue filtering.", visible)
+        self.assertIn("Improve the IMS queue surface.", visible)
+
+    def test_proposed_handoff_uses_intended_code_and_same_sources(self) -> None:
+        self._create_proposed_sprint_record(title="Worklog Idea Inventory UI Cleanup", app_product="Worklog")
+        record = viewer_app._sprint_records()[0]
+        html = self._client().get(f"/sprints/{record['id']}").get_data(as_text=True)
+        self.assertIn("WL-SPRINT-20260620-001", html)
+        self.assertNotIn("PR-20260620120000-001", html)
+        self.assertIn("Improve the IMS queue surface.", html)
+        self.assertIn("Tighten Worklog queue filtering.", html)
 
     def test_missing_handoff_shows_warning(self) -> None:
         path = self._create_sprint_record("approved")
@@ -307,8 +330,11 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self._create_proposed_sprint_record()
         client = self._client()
         record_id = viewer_app._sprint_records()[0]["id"]
+        before = viewer_app._sprint_records()[0]["intended_sprint_code"]
         response = client.post(f"/sprints/{record_id}/action", data={"action": "approve"}, follow_redirects=True)
         self.assertEqual(response.status_code, 200)
+        approved = viewer_app._sprint_records()[0]
+        self.assertEqual(approved["sprint_code"], before)
         self.assertTrue(list((self.root / "06-sprints/approved").glob("*.md")))
         self.assertFalse(list((self.root / "06-sprints/proposed").glob("*.md")))
 

@@ -733,14 +733,23 @@ def _write_proposed_sprint_record(group: dict[str, object]) -> Path:
     proposal_id = str(group.get("proposal_id") or _generate_proposal_id())
     title = str(group.get("sprint_group_name") or "Proposed Sprint Group")
     path = _proposal_record_path(proposal_id, title)
-    source_idea_summaries = [str(item) for item in group.get("source_idea_summaries", [])]
-    source_thoughts = [str(item) for item in group.get("source_thoughts", [])]
-    proposed_work = [str(item) for item in group.get("proposed_work", [])]
+    intended_sprint_code = str(group.get("intended_sprint_code") or group.get("sprint_code") or _generate_sprint_code(str(group.get("app_product") or "Other")))
+    source_idea_summaries = [str(item) for item in group.get("source_idea_summaries", []) if str(item).strip()]
+    source_thoughts = [str(item) for item in group.get("source_thoughts", []) if str(item).strip()]
+    if not source_idea_summaries:
+        source_idea_summaries = list(dict.fromkeys(source_thoughts))
+    proposed_work = [str(item) for item in group.get("proposed_work", []) if str(item).strip()]
+    if not proposed_work:
+        proposed_work = list(dict.fromkeys(source_idea_summaries or source_thoughts))
+    handoff_md = str(group.get("handoff_md") or "").strip()
+    if handoff_md:
+        handoff_md = "```markdown\n" + handoff_md + "\n```"
     text = "\n".join(
         [
             f"# Proposed Sprint Group: {title}",
             "",
             f"- proposal_id: {proposal_id}",
+            f"- intended_sprint_code: {intended_sprint_code}",
             f"- sprint_group_name: {title}",
             f"- app_product: {group.get('app_product') or 'Other'}",
             f"- scope: {group.get('scope') or 'Small'}",
@@ -754,13 +763,13 @@ def _write_proposed_sprint_record(group: dict[str, object]) -> Path:
             *([f"- {item}" for item in source_idea_summaries] or [f"- {item}" for item in source_thoughts] or ["- None"]),
             "",
             "## Proposed Work",
-            *([f"- {item}" for item in proposed_work] or ["- Triage raw ideas into a focused sprint slice."]),
+            *([f"- {item}" for item in proposed_work] or [f"- {item}" for item in source_idea_summaries] or [f"- {item}" for item in source_thoughts] or ["- Triage raw ideas into a focused sprint slice."]),
             "",
             "## Recommended First Step",
             f"{group.get('recommended_first_step') or ''}",
             "",
             "## Handoff Preview",
-            str(group.get("handoff_md") or ""),
+            handoff_md or "No handoff content found. Regenerate handoff.",
             "",
         ]
     )
@@ -867,6 +876,7 @@ def _parse_proposed_sprint_record(path: Path) -> dict[str, object]:
             proposed_work.append(line[2:].strip())
     return {
         "proposal_id": meta.get("proposal_id") or path.stem.split("-", 1)[0],
+        "intended_sprint_code": meta.get("intended_sprint_code") or meta.get("sprint_code") or "",
         "sprint_group_name": meta.get("sprint_group_name") or path.stem.split("-", 1)[1].replace("-", " ").title(),
         "app_product": meta.get("app_product") or "Other",
         "scope": meta.get("scope") or "Small",
@@ -990,7 +1000,7 @@ def _proposal_to_sprint_record(proposal: dict[str, object]) -> tuple[dict[str, o
         proposal_source_summaries = [str(item) for item in proposal.get("source_ideas", []) if str(item).strip()]
     if not proposal.get("proposed_work") and proposal_source_summaries:
         proposal = {**proposal, "proposed_work": proposal_source_summaries}
-    sprint_code = str(proposal.get("sprint_code") or _generate_sprint_code(str(proposal.get("app_product") or "Other")))
+    sprint_code = str(proposal.get("intended_sprint_code") or proposal.get("sprint_code") or _generate_sprint_code(str(proposal.get("app_product") or "Other")))
     sprint_record = {
         **proposal,
         "status": "approved",
@@ -998,6 +1008,7 @@ def _proposal_to_sprint_record(proposal: dict[str, object]) -> tuple[dict[str, o
         "sprint_code": sprint_code,
         "created_at": proposal.get("created_at") or datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
+        "intended_sprint_code": sprint_code,
         "proposed_work": proposal.get("proposed_work") or [],
         "source_idea_summaries": proposal_source_summaries,
         "purpose": proposal.get("purpose") or "",
@@ -1188,7 +1199,8 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
             handoff_markdown = handoff_file.read_text(encoding="utf-8")
     return {
         "id": sprint_id,
-        "sprint_code": meta.get("sprint_code") or sprint_id.upper(),
+        "sprint_code": meta.get("intended_sprint_code") or meta.get("sprint_code") or sprint_id.upper(),
+        "intended_sprint_code": meta.get("intended_sprint_code") or meta.get("sprint_code") or sprint_id.upper(),
         "title": title,
         "app_product": app_product,
         "status": status.title(),
@@ -1200,7 +1212,7 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
         "path": str(path.relative_to(WORKLOG_ROOT)),
         "source_thoughts": source_thoughts,
         "source_thought_paths": source_thought_paths,
-        "source_idea_summaries": source_idea_summaries,
+        "source_idea_summaries": source_idea_summaries or source_thoughts,
         "digested_source_thoughts": digested_source_thoughts,
         "proposed_work": proposed_work,
         "handoff_path": handoff_path,
@@ -2000,15 +2012,25 @@ def _build_codex_prompt(app_name: str, sprint_name: str, thoughts: list[dict[str
 
 def _build_handoff_markdown(app_name: str, sprint_name: str, thoughts: list[dict[str, str]], group: dict[str, object]) -> str:
     purpose = group.get("purpose") or f"Turn {app_name} raw ideas into a focused sprint-sized implementation conversation."
-    sprint_code = str(group.get("sprint_code") or (thoughts[0].get("sprint_code") if thoughts else "") or "TBD").strip()
+    sprint_code = str(group.get("intended_sprint_code") or group.get("sprint_code") or (thoughts[0].get("sprint_code") if thoughts else "") or "TBD").strip()
+    source_ideas_source = thoughts or group.get("source_idea_summaries") or group.get("source_ideas") or []
+    if not source_ideas_source and group.get("source_thought_paths"):
+        source_ideas_source = [Path(str(path)).stem.replace("-", " ").title() for path in group.get("source_thought_paths") or []]
+    if isinstance(source_ideas_source, list):
+        source_ideas = [
+            f"- {item.get('normalized_summary') or item.get('raw_text_full') or item.get('display_snippet') or item.get('title') or item.get('path')}"
+            if isinstance(item, dict)
+            else f"- {str(item)}"
+            for item in source_ideas_source
+        ]
+    else:
+        source_ideas = [f"- {str(source_ideas_source)}"]
     proposed_work = [
         f"- {thought.get('normalized_summary') or thought.get('raw_text_full') or thought.get('display_snippet') or thought.get('title') or 'Worklog idea'}"
         for thought in thoughts[:5]
     ]
-    source_ideas = [
-        f"- {thought.get('normalized_summary') or thought.get('raw_text_full') or thought.get('display_snippet') or thought.get('title') or thought.get('path')}"
-        for thought in thoughts
-    ]
+    if not proposed_work:
+        proposed_work = list(source_ideas)
     return "\n".join(
         [
             f"# Sprint Handoff: {sprint_name}",
@@ -2023,7 +2045,7 @@ def _build_handoff_markdown(app_name: str, sprint_name: str, thoughts: list[dict
             purpose,
             "",
             "## Source Ideas",
-            *source_ideas,
+            *(source_ideas or ["- No handoff content found. Regenerate handoff."]),
             "",
             "## Proposed Work",
             *(proposed_work or ["- Triage raw ideas into a focused implementation plan."]),
@@ -2119,6 +2141,7 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
             group = {
                 "app_product": app_name,
                 "sprint_code": sprint_code,
+                "intended_sprint_code": sprint_code,
                 "sprint_group_name": sprint_name,
                 "ideas_included": len(cluster_thoughts),
                 "proposed_type": proposed_type,
@@ -2144,6 +2167,7 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
             {
                 "app_product": thought["ai_inferred_app"],
                 "sprint_code": sprint_code,
+                "intended_sprint_code": sprint_code,
                 "sprint_group_name": sprint_name,
                 "ideas_included": 1,
                 "proposed_type": _sprint_group_type([thought]),
@@ -2185,6 +2209,7 @@ def _group_thoughts_for_sprints(items: list[dict[str, str]]) -> dict[str, object
 def _proposal_view_from_group(group: dict[str, object]) -> dict[str, object]:
     return {
         "proposal_id": group.get("proposal_id") or "",
+        "intended_sprint_code": group.get("intended_sprint_code") or group.get("sprint_code") or "",
         "sprint_group_name": group.get("sprint_group_name") or "",
         "app_product": group.get("app_product") or "Other",
         "ideas_included": len(group.get("source_thought_ids") or group.get("source_thought_paths") or []),
@@ -2901,16 +2926,19 @@ def assistant_digest_preview():
         return {"ok": False, "error": "Selected idea IDs no longer match active raw ideas."}, 400
     preview = _digest_groups_from_items(thoughts)
     for group in preview.get("sprint_groups", []):
+        intended_sprint_code = str(group.get("intended_sprint_code") or group.get("sprint_code") or _generate_sprint_code(str(group.get("app_product") or "Other")))
         proposal = {
             **group,
             "proposal_id": group.get("proposal_id") or _generate_proposal_id(),
+            "intended_sprint_code": intended_sprint_code,
+            "sprint_code": intended_sprint_code,
             "status": "proposed",
             "created_at": datetime.now(timezone.utc).isoformat(),
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "source_thought_paths": group.get("source_thoughts") or [],
             "source_thought_ids": [str(item) for item in group.get("thoughts", []) and [_thought_item_fingerprint(item) for item in group.get("thoughts", [])] or []],
             "source_idea_summaries": [thought.get("normalized_summary") or thought.get("display_snippet") or thought.get("raw_text_full") for thought in group.get("thoughts", [])],
-            "handoff_md": _build_handoff_markdown(group["app_product"], group["sprint_group_name"], group["thoughts"], group),
+            "handoff_md": _build_handoff_markdown(group["app_product"], group["sprint_group_name"], group["thoughts"], {**group, "intended_sprint_code": intended_sprint_code}),
         }
         proposal["path"] = str(_write_proposed_sprint_record(proposal).relative_to(WORKLOG_ROOT))
     preview["selection_mode"] = "selected" if (thought_ids or thought_paths) else "all"
@@ -2939,13 +2967,15 @@ def assistant_approve_digest():
             proposal = {
                 **group,
                 "proposal_id": _generate_proposal_id(),
+                "intended_sprint_code": str(group.get("intended_sprint_code") or group.get("sprint_code") or _generate_sprint_code(str(group.get("app_product") or "Other"))),
+                "sprint_code": str(group.get("intended_sprint_code") or group.get("sprint_code") or _generate_sprint_code(str(group.get("app_product") or "Other"))),
                 "status": "proposed",
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
                 "source_thought_paths": [thought.get("path") for thought in group.get("thoughts") or [] if thought.get("path")],
                 "source_thought_ids": [_thought_item_fingerprint(thought) for thought in group.get("thoughts") or [] if thought.get("path")],
                 "source_idea_summaries": [thought.get("normalized_summary") or thought.get("display_snippet") or thought.get("raw_text_full") for thought in group.get("thoughts") or [] if thought.get("path")],
-                "handoff_md": _build_handoff_markdown(group["app_product"], group["sprint_group_name"], group["thoughts"], group),
+                "handoff_md": _build_handoff_markdown(group["app_product"], group["sprint_group_name"], group["thoughts"], {**group, "intended_sprint_code": str(group.get("intended_sprint_code") or group.get("sprint_code") or "")}),
             }
             _write_proposed_sprint_record(proposal)
             proposal_ids.append(proposal["proposal_id"])
