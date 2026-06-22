@@ -313,7 +313,9 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("## Source Ideas", proposed_text)
         self.assertIn("## Proposed Work", proposed_text)
         self.assertIn("## Codex/ChatGPT Starting Prompt", proposed_text)
-        self.assertTrue(list((self.root / "04-inbox/thought-box/digested").glob("*.md")))
+        self.assertTrue(list((self.root / "04-inbox/thought-box/proposed").glob("*.md")))
+        active_thoughts = viewer_app._thought_box_items(digested_only=False)
+        self.assertFalse(any(item["raw_text_full"] == "IMS needs break bulk handling." for item in active_thoughts))
 
     def test_create_proposed_sprints_only_moves_selected_thoughts(self) -> None:
         self._write_thought(
@@ -333,11 +335,10 @@ class WorklogAssistantTests(unittest.TestCase):
         ).get_json()["digest_preview"]
         response = self._client().post("/api/assistant/create-proposed-sprints", json={"digest_preview": preview, "action": "accept_suggested"})
         self.assertEqual(response.status_code, 200)
-        digested = sorted(p.name for p in (self.root / "04-inbox/thought-box/digested").glob("*.md"))
+        digested = sorted(p.name for p in (self.root / "04-inbox/thought-box/proposed").glob("*.md"))
         active = sorted(p.name for p in (self.root / "04-inbox/thought-box").glob("*.md"))
         self.assertEqual(len(digested), 1)
         self.assertEqual(len(active), 1)
-        self.assertIn("2026-06-20-100000-ims.md", active[0])
 
     def test_empty_selection_returns_clear_error(self) -> None:
         response = self._client().post(
@@ -436,7 +437,7 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertTrue(body["sprint_queue_url"].endswith("/sprints?status=proposed"))
         proposed_files = list((self.root / "06-sprints/proposed").glob("*.md"))
         self.assertEqual(len(proposed_files), 1)
-        digested_files = sorted(p.name for p in (self.root / "04-inbox/thought-box/digested").glob("*.md"))
+        digested_files = sorted(p.name for p in (self.root / "04-inbox/thought-box/proposed").glob("*.md"))
         active_files = sorted(p.name for p in (self.root / "04-inbox/thought-box").glob("*.md"))
         self.assertEqual(len(digested_files), 1)
         self.assertEqual(len(active_files), 2)

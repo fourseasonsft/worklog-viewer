@@ -371,6 +371,8 @@ class WorklogSprintQueueTests(unittest.TestCase):
         thoughts = client.get("/api/assistant/thoughts").get_json()["thoughts"]
         self.assertTrue(any(thought["raw_text_full"] == "Improve the IMS queue surface." for thought in thoughts))
         self.assertTrue(any(thought["raw_text_full"] == "Tighten Worklog queue filtering." for thought in thoughts))
+        restored = next(thought for thought in thoughts if thought["raw_text_full"] == "Improve the IMS queue surface.")
+        self.assertNotEqual(restored["created_display"], "Unknown")
 
     def test_approved_delete_restores_ideas_and_moves_handoff(self) -> None:
         self._create_proposed_sprint_record()
@@ -390,6 +392,8 @@ class WorklogSprintQueueTests(unittest.TestCase):
         thoughts = client.get("/api/assistant/thoughts").get_json()["thoughts"]
         self.assertTrue(any(thought["raw_text_full"] == "Improve the IMS queue surface." for thought in thoughts))
         self.assertTrue(any(thought["raw_text_full"] == "Tighten Worklog queue filtering." for thought in thoughts))
+        restored = next(thought for thought in thoughts if thought["raw_text_full"] == "Improve the IMS queue surface.")
+        self.assertNotEqual(restored["created_display"], "Unknown")
 
     def test_existing_active_ideas_are_not_duplicated(self) -> None:
         self._create_proposed_sprint_record()
@@ -467,7 +471,8 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("Improve the IMS queue surface.", restored_text)
 
     def test_proposed_rescind_restores_test_idea_to_active_inventory(self) -> None:
-        source = self.root / "04-inbox/thought-box/digested/2026-06-22-193423-test.md"
+        source = self.root / "04-inbox/thought-box/proposed/2026-06-22-193423-test.md"
+        source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text(
             "# test\n\n- created_at: 2026-06-22T19:34:23Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: test\n- ai_inferred_app: \n- ai_inferred_type: thought\n- ai_summary: test\n",
             encoding="utf-8",
@@ -487,7 +492,8 @@ class WorklogSprintQueueTests(unittest.TestCase):
                     "- created_at: 2026-06-22T19:34:34.533360+00:00",
                     "- updated_at: 2026-06-22T19:34:34.533360+00:00",
                     "- source_thought_ids: 9f86d081884c7d65",
-                    "- source_thought_paths: 04-inbox/thought-box/digested/2026-06-22-193423-test.md",
+                    "- source_thought_paths: 04-inbox/thought-box/proposed/2026-06-22-193423-test.md",
+                    "- source_created_ats: 2026-06-22T19:34:23Z",
                     "",
                     "## Source Ideas",
                     "- test",
@@ -517,6 +523,25 @@ class WorklogSprintQueueTests(unittest.TestCase):
         thoughts = client.get("/api/assistant/thoughts").get_json()["thoughts"]
         self.assertTrue(any(thought["raw_text_full"] == "test" for thought in thoughts))
         self.assertTrue(any(thought["digest_status"] == "not_digested" for thought in thoughts if thought["raw_text_full"] == "test"))
+        restored = next(thought for thought in thoughts if thought["raw_text_full"] == "test")
+        self.assertNotEqual(restored["created_display"], "Unknown")
+        self.assertTrue(restored.get("created_at") or restored.get("created_display"))
+
+    def test_proposed_creation_moves_source_ideas_out_of_active_inventory(self) -> None:
+        (self.root / "04-inbox/thought-box/2026-06-20-100000-ims.md").write_text(
+            "# IMS\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs break bulk handling.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs break bulk handling.\n",
+            encoding="utf-8",
+        )
+        (self.root / "04-inbox/thought-box/2026-06-20-100001-worklog.md").write_text(
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:01Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Worklog needs queue selection.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Worklog needs queue selection.\n",
+            encoding="utf-8",
+        )
+        preview = viewer_app._digest_preview(viewer_app._thought_box_items(digested_only=False))
+        response = self._client().post("/api/assistant/create-proposed-sprints", json={"digest_preview": preview, "action": "combine_all"})
+        self.assertEqual(response.status_code, 200)
+        thoughts = self._client().get("/api/assistant/thoughts").get_json()["thoughts"]
+        self.assertFalse(any(thought["raw_text_full"] == "IMS needs break bulk handling." for thought in thoughts))
+        self.assertFalse(any(thought["raw_text_full"] == "Worklog needs queue selection." for thought in thoughts))
 
     def test_confirmation_routes_require_post(self) -> None:
         self._create_sprint_record("approved")
@@ -545,7 +570,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
         body = response.get_json()
         self.assertTrue(body["created_proposed_sprints"])
         self.assertTrue(list((self.root / "06-sprints/proposed").glob("*.md")))
-        self.assertTrue(list((self.root / "04-inbox/thought-box/digested").glob("*.md")))
+        self.assertTrue(list((self.root / "04-inbox/thought-box/proposed").glob("*.md")))
         record = viewer_app._proposed_sprint_records()[0]
         self.assertTrue(record["source_thought_paths"])
         self.assertTrue(record.get("source_ideas"))

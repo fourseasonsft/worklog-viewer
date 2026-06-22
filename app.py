@@ -682,6 +682,10 @@ def _thought_digested_dir() -> Path:
     return THOUGHT_BOX_DIR / "digested"
 
 
+def _thought_proposed_dir() -> Path:
+    return THOUGHT_BOX_DIR / "proposed"
+
+
 def _thought_archived_dir() -> Path:
     return THOUGHT_BOX_DIR / "archived"
 
@@ -741,6 +745,7 @@ def _write_proposed_sprint_record(group: dict[str, object]) -> Path:
     proposed_work = [str(item) for item in group.get("proposed_work", []) if str(item).strip()]
     if not proposed_work:
         proposed_work = list(dict.fromkeys(source_idea_summaries or source_thoughts))
+    proposed_source_thoughts = [str(item) for item in group.get("proposed_source_thoughts", []) if str(item).strip()]
     handoff_md = str(group.get("handoff_md") or "").strip()
     if handoff_md:
         handoff_md = "```markdown\n" + handoff_md + "\n```"
@@ -758,9 +763,13 @@ def _write_proposed_sprint_record(group: dict[str, object]) -> Path:
             f"- updated_at: {datetime.now(timezone.utc).isoformat()}",
             f"- source_thought_ids: {', '.join(str(item) for item in group.get('source_thought_ids', []))}",
             f"- source_thought_paths: {', '.join(str(item) for item in group.get('source_thought_paths', []))}",
+            f"- proposed_source_thoughts: {', '.join(proposed_source_thoughts)}",
             "",
             "## Source Ideas",
             *([f"- {item}" for item in source_idea_summaries] or [f"- {item}" for item in source_thoughts] or ["- None"]),
+            "",
+            "## Proposed Source Thoughts",
+            *([f"- {item}" for item in proposed_source_thoughts] or ["- None"]),
             "",
             "## Proposed Work",
             *([f"- {item}" for item in proposed_work] or [f"- {item}" for item in source_idea_summaries] or [f"- {item}" for item in source_thoughts] or ["- Triage raw ideas into a focused sprint slice."]),
@@ -787,6 +796,10 @@ def _restore_source_thought_path(source_path: str) -> tuple[str | None, str | No
     else:
         candidate_name = Path(source_path).name
     active_target = THOUGHT_BOX_DIR / candidate_name
+    holding_candidates = [
+        _thought_proposed_dir() / candidate_name,
+        _thought_digested_dir() / candidate_name,
+    ]
     if source_file.exists():
         if source_file.parent == THOUGHT_BOX_DIR:
             return str(source_file.relative_to(WORKLOG_ROOT)), None
@@ -810,12 +823,34 @@ def _restore_source_thought_path(source_path: str) -> tuple[str | None, str | No
                     return str(target.relative_to(WORKLOG_ROOT)), None
                 return None, f"unable to restore source idea: {source_path} ({exc})"
         return str(target.relative_to(WORKLOG_ROOT)), None
+    for holding_file in holding_candidates:
+        if holding_file.exists():
+            target = active_target
+            if target.exists():
+                stem = target.stem
+                suffix = target.suffix
+                for index in range(2, 1000):
+                    candidate = THOUGHT_BOX_DIR / f"{stem}-restored-{index:03d}{suffix}"
+                    if not candidate.exists():
+                        target = candidate
+                        break
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.move(str(holding_file), str(target))
+            except OSError:
+                try:
+                    target.write_text(holding_file.read_text(encoding="utf-8"), encoding="utf-8")
+                except OSError as exc:
+                    if target.exists():
+                        return str(target.relative_to(WORKLOG_ROOT)), None
+                    return None, f"unable to restore source idea: {source_path} ({exc})"
+            return str(target.relative_to(WORKLOG_ROOT)), None
     if active_target.exists():
         return str(active_target.relative_to(WORKLOG_ROOT)), None
     return None, f"missing source idea: {source_path}"
 
 
-def _recreate_restored_thought(source_path: str, summary: str, sprint_code: str, restore_reason: str) -> tuple[str | None, str | None]:
+def _recreate_restored_thought(source_path: str, summary: str, sprint_code: str, restore_reason: str, created_at: str = "") -> tuple[str | None, str | None]:
     summary = summary.strip()
     if not summary:
         return None, f"missing source idea: {source_path}"
@@ -833,12 +868,14 @@ def _recreate_restored_thought(source_path: str, summary: str, sprint_code: str,
                 break
     target.parent.mkdir(parents=True, exist_ok=True)
     restored_at = datetime.now(timezone.utc).isoformat()
+    created_at_value = created_at.strip() or restored_at
     try:
         target.write_text(
             "\n".join(
                 [
                     f"# Restored Idea: {source_name}",
                     "",
+                    f"- created_at: {created_at_value}",
                     f"- restored_from_sprint_code: {sprint_code or ''}",
                     f"- restored_at: {restored_at}",
                     f"- restore_reason: {restore_reason}",
@@ -903,11 +940,33 @@ def _normalize_restored_thought_file(path: Path, sprint_code: str, restore_reaso
     )
 
 
+def _rewrite_thought_created_at(path: Path, created_at: str) -> None:
+    if not path.exists() or not created_at.strip():
+        return
+    text = path.read_text(encoding="utf-8")
+    if re.search(r"^- created_at: .*?$", text, flags=re.M):
+        text = re.sub(r"^- created_at: .*?$", f"- created_at: {created_at.strip()}", text, flags=re.M)
+    else:
+        text = text.replace("- source: David\n", f"- created_at: {created_at.strip()}\n- source: David\n", 1)
+    path.write_text(text, encoding="utf-8")
+
+
+def _thought_created_at_from_path(path: Path) -> str:
+    if not path.exists():
+        return ""
+    try:
+        parsed = _parse_thought_file(path)
+    except OSError:
+        return ""
+    return str(parsed.get("created_at") or "").strip()
+
+
 def _restore_source_ideas_for_record(record: dict[str, object], restore_reason: str = "rescinded") -> tuple[list[str], list[str], dict[str, int]]:
     restored: list[str] = []
     warnings: list[str] = []
     counts = {"restored": 0, "already_active": 0, "recreated": 0, "missing": 0}
     candidates = list(dict.fromkeys([
+        *[str(item) for item in record.get("proposed_source_thoughts", []) if str(item).strip()],
         *[str(item) for item in record.get("digested_source_thoughts", []) if str(item).strip()],
         *[str(item) for item in record.get("source_thought_paths", []) if str(item).strip()],
         *[str(item) for item in record.get("source_thoughts", []) if str(item).strip()],
@@ -921,14 +980,35 @@ def _restore_source_ideas_for_record(record: dict[str, object], restore_reason: 
         )
         if str(item).strip()
     ]
+    created_ats = [
+        str(item)
+        for item in (
+            record.get("source_created_ats")
+            or []
+        )
+        if str(item).strip()
+    ]
     sprint_code = str(record.get("sprint_code") or record.get("intended_sprint_code") or "")
     for index, source_path in enumerate(candidates):
         source_file = WORKLOG_ROOT / source_path.strip()
         already_active = source_file.exists() and source_file.parent == THOUGHT_BOX_DIR
+        holding_file = None
+        if not source_file.exists():
+            for candidate in (_thought_proposed_dir() / source_file.name, _thought_digested_dir() / source_file.name):
+                if candidate.exists():
+                    holding_file = candidate
+                    break
+        created_at = _thought_created_at_from_path(source_file)
+        if not created_at and holding_file:
+            created_at = _thought_created_at_from_path(holding_file)
+        if not created_at and created_ats:
+            created_at = created_ats[min(index, len(created_ats) - 1)]
         restored_path, warning = _restore_source_thought_path(source_path)
         if restored_path:
             restored_file = WORKLOG_ROOT / restored_path
             source_summary = summaries[min(index, len(summaries) - 1)] if summaries else ""
+            if created_at:
+                _rewrite_thought_created_at(restored_file, created_at)
             restored.append(restored_path)
             if already_active:
                 counts["already_active"] += 1
@@ -942,7 +1022,7 @@ def _restore_source_ideas_for_record(record: dict[str, object], restore_reason: 
         source_summary = ""
         if summaries:
             source_summary = summaries[min(index, len(summaries) - 1)]
-        recreated_path, recreate_warning = _recreate_restored_thought(source_path, source_summary, sprint_code, restore_reason)
+        recreated_path, recreate_warning = _recreate_restored_thought(source_path, source_summary, sprint_code, restore_reason, created_at=created_at)
         if recreated_path:
             counts["recreated"] += 1
             restored.append(recreated_path)
@@ -954,11 +1034,13 @@ def _restore_source_ideas_for_record(record: dict[str, object], restore_reason: 
             warnings.append(warning)
     if not candidates and summaries:
         for index, summary in enumerate(summaries, start=1):
+            created_at = created_ats[min(index - 1, len(created_ats) - 1)] if created_ats else ""
             recreated_path, recreate_warning = _recreate_restored_thought(
                 f"restored-summary-{index}.md",
                 summary,
                 sprint_code,
                 restore_reason,
+                created_at=created_at,
             )
             if recreated_path:
                 _normalize_restored_thought_file(WORKLOG_ROOT / recreated_path, sprint_code, restore_reason, source_summary=summary)
@@ -1017,6 +1099,8 @@ def _parse_proposed_sprint_record(path: Path) -> dict[str, object]:
             continue
         if current_section == "source ideas" and line.startswith("- "):
             source_ideas.append(line[2:].strip())
+        elif current_section == "proposed source thoughts" and line.startswith("- "):
+            source_ideas.append(line[2:].strip())
         elif current_section == "proposed work" and line.startswith("- "):
             proposed_work.append(line[2:].strip())
     return {
@@ -1030,6 +1114,8 @@ def _parse_proposed_sprint_record(path: Path) -> dict[str, object]:
         "updated_at": meta.get("updated_at") or _format_file_timestamp(path),
         "source_thought_ids": [item.strip() for item in (meta.get("source_thought_ids") or "").split(",") if item.strip()],
         "source_thought_paths": [item.strip() for item in (meta.get("source_thought_paths") or "").split(",") if item.strip()],
+        "proposed_source_thoughts": [item.strip() for item in (meta.get("proposed_source_thoughts") or "").split(",") if item.strip()],
+        "source_created_ats": [item.strip() for item in (meta.get("source_created_ats") or "").split(",") if item.strip()],
         "source_ideas": source_ideas,
         "proposed_work": proposed_work,
         "recommended_first_step": meta.get("recommended_first_step") or _extract_section_text(text, "Recommended First Step"),
@@ -1087,6 +1173,13 @@ def _approve_proposed_sprint_record(record: dict[str, object]) -> dict[str, obje
     active_thoughts = _thoughts_by_ids([str(item) for item in record.get("source_thought_ids", []) if str(item).strip()])
     if not active_thoughts:
         active_thoughts = _thoughts_by_paths([str(path) for path in record.get("source_thought_paths", [])])
+    if not active_thoughts:
+        proposed_paths = [
+            str(_thought_proposed_dir() / Path(str(path)).name)
+            for path in record.get("source_thought_paths", [])
+            if str(path).strip()
+        ]
+        active_thoughts = _thoughts_by_paths(proposed_paths)
     if not active_thoughts and record.get("source_ideas"):
         wanted = {str(item).strip().lower() for item in record.get("source_ideas", []) if str(item).strip()}
         for item in _thought_box_items(digested_only=False):
@@ -1108,10 +1201,14 @@ def _approve_proposed_sprint_record(record: dict[str, object]) -> dict[str, obje
     if not active_thoughts:
         for source_path in [str(path) for path in record.get("source_thought_paths", []) if str(path).strip()]:
             source_file = WORKLOG_ROOT / source_path
+            if not source_file.exists():
+                source_file = _thought_proposed_dir() / Path(source_path).name
             if source_file.exists():
                 active_thoughts.append({"path": source_path})
     for thought in active_thoughts:
         source_file = WORKLOG_ROOT / thought["path"]
+        if not source_file.exists():
+            source_file = _thought_proposed_dir() / Path(thought["path"]).name
         if not source_file.exists():
             continue
         destination = _move_thought(source_file, _thought_digested_dir())
@@ -1553,6 +1650,14 @@ def _move_thought(path: Path, destination_dir: Path) -> Path:
     _ensure_thought_box_dir()
     destination_dir.mkdir(parents=True, exist_ok=True)
     destination = destination_dir / path.name
+    if destination.exists():
+        stem = destination.stem
+        suffix = destination.suffix or ".md"
+        for index in range(2, 1000):
+            candidate = destination_dir / f"{stem}-restored-{index:03d}{suffix}"
+            if not candidate.exists():
+                destination = candidate
+                break
     shutil.move(str(path), str(destination))
     return destination
 
@@ -2237,6 +2342,7 @@ def _proposal_from_digest_group(group: dict[str, object]) -> dict[str, object]:
     ]
     source_thought_paths = [thought.get("path") for thought in thoughts if thought.get("path")]
     source_thought_ids = [_thought_item_fingerprint(thought) for thought in thoughts if thought.get("path")]
+    source_created_ats = [thought.get("created_at") or "" for thought in thoughts if thought.get("path")]
     return {
         **group,
         "proposal_id": group.get("proposal_id") or _generate_proposal_id(),
@@ -2247,6 +2353,7 @@ def _proposal_from_digest_group(group: dict[str, object]) -> dict[str, object]:
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "source_thought_paths": source_thought_paths,
         "source_thought_ids": source_thought_ids,
+        "source_created_ats": source_created_ats,
         "source_idea_summaries": source_idea_summaries,
         "proposed_work": group.get("proposed_work") or source_idea_summaries,
         "handoff_md": _build_handoff_markdown(
@@ -2299,9 +2406,11 @@ def _create_proposed_sprints_from_preview(preview: dict[str, object], mode: str 
                 continue
             source_file = WORKLOG_ROOT / str(thought["path"])
             if source_file.exists():
-                destination = _move_thought(source_file, _thought_digested_dir())
+                destination = _move_thought(source_file, _thought_proposed_dir())
                 moved_thoughts.append(str(destination.relative_to(WORKLOG_ROOT)))
-        proposal["digested_source_thoughts"] = moved_thoughts
+        proposal["proposed_source_thoughts"] = moved_thoughts
+        proposal["digested_source_thoughts"] = []
+        _update_sprint_record(record_path, "proposed")
         created.append(proposal)
     return created
 
