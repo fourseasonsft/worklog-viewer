@@ -114,7 +114,7 @@
   </section>
 </div>
 
-<div class="modal fade" id="digest-grouping-review-modal" tabindex="-1" aria-labelledby="digest-grouping-review-title" aria-hidden="true">
+<div class="modal fade d-none" id="digest-grouping-review-modal" tabindex="-1" aria-labelledby="digest-grouping-review-title" aria-hidden="true" style="display:none;">
   <div class="modal-dialog modal-xl modal-dialog-scrollable modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
@@ -222,9 +222,8 @@
   const selectedCountBadge = document.getElementById('selected-count-badge');
   const selectionStatus = document.getElementById('selection-status');
   const digestResult = document.getElementById('digest-result');
-  const digestModal = document.getElementById('digest-grouping-review-modal');
   const digestModalResult = document.getElementById('digest-modal-result');
-  const digestModalInstance = digestModal ? new bootstrap.Modal(digestModal) : null;
+  const digestModal = document.getElementById('digest-grouping-review-modal');
   let digestPreview = {{ digest_preview | tojson if digest_preview else 'null' }};
 
   function selectedCheckboxes() {
@@ -249,6 +248,24 @@
     if (!digestModalResult) return;
     digestModalResult.className = 'alert d-none mt-3 mb-0';
     digestModalResult.innerHTML = '';
+  }
+
+  function openDigestModal() {
+    if (!digestModal) return;
+    digestModal.classList.remove('d-none');
+    digestModal.classList.add('show');
+    digestModal.setAttribute('aria-hidden', 'false');
+    digestModal.style.display = 'block';
+    document.body.classList.add('modal-open');
+  }
+
+  function closeDigestModal() {
+    if (!digestModal) return;
+    digestModal.classList.add('d-none');
+    digestModal.classList.remove('show');
+    digestModal.setAttribute('aria-hidden', 'true');
+    digestModal.style.display = 'none';
+    document.body.classList.remove('modal-open');
   }
 
   function showDigestResult(message, variant = 'success', links = []) {
@@ -321,7 +338,7 @@
         digestSourceTable.appendChild(tr);
       });
     }
-    digestModalInstance?.show();
+    openDigestModal();
   }
 
   async function finalizeDigest(action) {
@@ -338,10 +355,10 @@
       return;
     }
     if (action === 'cancel') {
-      digestModalInstance?.hide();
+      closeDigestModal();
       return;
     }
-    digestModalInstance?.hide();
+    closeDigestModal();
     showDigestResult(data.assistant_reply || 'Proposed sprint groups created.', 'success', [
       '<a class="btn btn-sm btn-outline-primary" href="/sprints?status=proposed">Open Sprint Queue</a>',
     ]);

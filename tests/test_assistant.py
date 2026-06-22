@@ -120,6 +120,16 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("- status: raw", content)
         self.assertIn("- digest_status: not_digested", content)
 
+    def test_save_idea_reloads_inventory(self) -> None:
+        response = self._client().post(
+            "/api/assistant/message",
+            json={"message": "Worklog needs calmer inbox rows"},
+        )
+        self.assertEqual(response.status_code, 200)
+        html = self._client().get("/assistant").get_data(as_text=True)
+        self.assertIn("Worklog needs calmer inbox rows", html)
+        self.assertIn("idea-select", html)
+
     def test_inventory_table_uses_short_display_fields(self) -> None:
         thought = self._write_thought(
             "2026-06-20-100000-clean.md",
@@ -250,7 +260,7 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("<table", html)
         self.assertIn("digest-grouping-review-modal", html)
         self.assertIn("review suggested sprint groups before creating proposals", html.lower())
-        self.assertIn("new bootstrap.Modal", html)
+        self.assertNotIn("new bootstrap.Modal", html)
 
     def test_create_proposed_sprints_from_suggested_groups(self) -> None:
         self._write_thought(
