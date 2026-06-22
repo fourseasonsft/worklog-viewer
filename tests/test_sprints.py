@@ -38,6 +38,8 @@ class WorklogSprintQueueTests(unittest.TestCase):
             "06-sprints/completed",
             "06-sprints/staged",
             "06-sprints/shipped",
+            "06-sprints/done",
+            "06-sprints/reconciled",
         ]:
             (self.root / rel).mkdir(parents=True, exist_ok=True)
         for name in ["core", "unity", "ims", "dispatch", "parking", "cy-storage", "hiring", "worklog"]:
@@ -183,6 +185,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("IMS Sprint", html)
         self.assertIn("Start Sprint", html)
         self.assertIn("onchange=\"this.form.requestSubmit()\"", html)
+        self.assertIn("Mark Done", html)
 
     def test_proposed_filter_renders_proposed_rows(self) -> None:
         self._create_proposed_sprint_record()
@@ -190,6 +193,33 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("IMS Proposed", html)
         self.assertIn("Approve", html)
         self.assertIn("Reject", html)
+        self.assertNotIn("Mark Done", html)
+
+    def test_mark_done_action_moves_record_to_done_queue(self) -> None:
+        self._create_sprint_record("active", app_product="Worklog", title="Worklog Sprint")
+        record_id = viewer_app._sprint_records()[0]["id"]
+        client = self._client()
+        response = client.post(
+            f"/sprints/{record_id}/action",
+            data={"action": "done", "confirm": "mark this sprint done and move it to the done queue?"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        done_records = viewer_app._sprint_records()
+        self.assertEqual(len([record for record in done_records if record["status_key"] == "done"]), 1)
+        record = done_records[0]
+        self.assertEqual(record["sprint_code"], "WL-SPRINT-20260620-001")
+        self.assertTrue(record["done_at"])
+        self.assertIn("Reconciliation Pending", (self.root / record["path"]).read_text(encoding="utf-8"))
+        done_html = client.get("/sprints?status=done").get_data(as_text=True)
+        self.assertIn("Worklog Sprint", done_html)
+        self.assertIn("Done", done_html)
+
+    def test_mark_done_does_not_appear_on_proposed_or_shipped(self) -> None:
+        self._create_proposed_sprint_record()
+        self._create_sprint_record("shipped", title="IMS Shipped")
+        html = self._client().get("/sprints").get_data(as_text=True)
+        self.assertNotIn("Mark Done", html)
 
     def test_proposed_detail_renders_sprint_style_layout(self) -> None:
         self._create_proposed_sprint_record(title="Worklog Idea Inventory UI Cleanup", app_product="Worklog")

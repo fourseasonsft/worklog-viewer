@@ -724,7 +724,7 @@ def _sprints_dir(status: str | None = None) -> Path:
 
 
 def _ensure_sprint_dirs() -> None:
-    for status in ["proposed", "rejected", "rescinded", "deleted", "approved", "active", "completed", "staged", "shipped"]:
+    for status in ["proposed", "rejected", "rescinded", "deleted", "approved", "active", "completed", "staged", "shipped", "done", "reconciled"]:
         _sprints_dir(status).mkdir(parents=True, exist_ok=True)
 
 
@@ -1568,12 +1568,15 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
         "completion_requirement": meta.get("completion requirement") or _extract_section_text(text, "Completion Requirement"),
         "purpose": meta.get("purpose") or _extract_section_text(text, "Purpose"),
         "recommended_first_step": meta.get("recommended_first_step") or _extract_section_text(text, "Recommended First Step"),
+        "done_at": meta.get("done_at") or "",
+        "done_source": meta.get("done_source") or "",
+        "reconciliation_pending": "## Reconciliation Pending" in text,
     }
 
 
 def _set_sprint_status(record: dict[str, object], status: str) -> Path:
     status = status.strip().lower()
-    if status not in {"proposed", "approved", "active", "completed", "staged", "shipped"}:
+    if status not in {"proposed", "approved", "active", "completed", "staged", "shipped", "done", "reconciled"}:
         raise ValueError(f"Unsupported sprint status: {status}")
     record_path = WORKLOG_ROOT / str(record["path"])
     new_path = _update_sprint_record(record_path, status)
@@ -1581,6 +1584,40 @@ def _set_sprint_status(record: dict[str, object], status: str) -> Path:
     record["status"] = status.title()
     record["path"] = str(new_path.relative_to(WORKLOG_ROOT))
     return new_path
+
+
+def _mark_sprint_done(record: dict[str, object], performed_by: str = "ui") -> Path:
+    record_path = WORKLOG_ROOT / str(record["path"])
+    done_at = datetime.now(timezone.utc).isoformat()
+    text = record_path.read_text(encoding="utf-8")
+    if "## Reconciliation Pending" not in text:
+        text += (
+            "\n## Reconciliation Pending\n"
+            "\nThis sprint was marked done from the UI and requires Codex reconciliation.\n"
+        )
+    text = re.sub(r"^- status: .*?$", "- status: done", text, flags=re.M)
+    if re.search(r"^- done_at: .*?$", text, flags=re.M):
+        text = re.sub(r"^- done_at: .*?$", f"- done_at: {done_at}", text, flags=re.M)
+    else:
+        insert_at = text.find("\n\n")
+        if insert_at == -1:
+            text += f"\n- done_at: {done_at}\n- done_source: ui\n"
+        else:
+            text = text[: insert_at + 2] + f"- done_at: {done_at}\n- done_source: ui\n" + text[insert_at + 2 :]
+    if re.search(r"^- done_source: .*?$", text, flags=re.M):
+        text = re.sub(r"^- done_source: .*?$", "- done_source: ui", text, flags=re.M)
+    text = re.sub(r"^- updated_at: .*?$", f"- updated_at: {done_at}", text, flags=re.M)
+    target = _sprints_dir("done") / record_path.name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    record_path.rename(target)
+    target.write_text(text, encoding="utf-8")
+    record["status_key"] = "done"
+    record["status"] = "Done"
+    record["path"] = str(target.relative_to(WORKLOG_ROOT))
+    record["done_at"] = done_at
+    record["done_source"] = performed_by
+    record["reconciliation_pending"] = True
+    return target
 
 
 def _resolve_sprint_source_thoughts(record: dict[str, object]) -> list[dict[str, str]]:
@@ -1908,7 +1945,7 @@ def _assistant_update_shipments() -> list[dict[str, str]]:
 def _sprint_records() -> list[dict[str, object]]:
     _ensure_sprint_dirs()
     records = []
-    for status in ["proposed", "rescinded", "deleted", "approved", "active", "completed", "staged", "shipped"]:
+    for status in ["proposed", "rescinded", "deleted", "approved", "active", "completed", "staged", "shipped", "done", "reconciled"]:
         for path in sorted(_sprints_dir(status).glob("*.md"), reverse=True):
             record = _parse_sprint_record(path)
             record["status_key"] = status
@@ -1922,7 +1959,7 @@ def _filter_sprint_records(records: list[dict[str, object]], status: str, app_sl
     status = (status or "all").lower()
     app_slug = _normalize_app_filter(app_slug)
     if status == "all":
-        filtered = [record for record in records if record.get("status_key") not in {"rescinded", "deleted"}]
+        filtered = [record for record in records if record.get("status_key") not in {"rescinded", "deleted", "done", "reconciled"}]
     else:
         filtered = [record for record in records if record.get("status_key") == status]
     if app_slug != "all":
@@ -3144,7 +3181,7 @@ def assistant():
 @_require_worklog_session
 def sprints():
     status = (request.args.get("status") or "all").strip().lower()
-    if status not in {"all", "proposed", "rescinded", "deleted", "approved", "active", "completed", "staged", "shipped"}:
+    if status not in {"all", "proposed", "rescinded", "deleted", "approved", "active", "completed", "staged", "shipped", "done", "reconciled"}:
         status = "all"
     app_slug = _normalize_app_filter(request.args.get("app"))
     records = _filter_sprint_records(_sprint_records(), status, app_slug)
@@ -3164,6 +3201,8 @@ def sprints():
             {"value": "completed", "label": "Completed"},
             {"value": "staged", "label": "Staged"},
             {"value": "shipped", "label": "Shipped"},
+            {"value": "done", "label": "Done"},
+            {"value": "reconciled", "label": "Reconciled"},
         ],
         proposed_sprints=[record for record in records if record.get("status_key") == "proposed"],
         app_filters=[
@@ -3210,6 +3249,9 @@ def sprint_action(sprint_id: str):
         new_path = _update_sprint_record(record_path, "staged")
     elif action == "ship":
         new_path = _update_sprint_record(record_path, "shipped")
+    elif action == "done":
+        new_path = _mark_sprint_done(record, performed_by=str(session.get(WORKLOG_SESSION_KEY, {}).get("username") or session.get(WORKLOG_SESSION_KEY, {}).get("email") or "ui"))
+        return redirect(url_for("sprints", status="done"))
     elif action == "regenerate_handoff":
         regenerated, handoff_path, sprint_path = _regenerate_sprint_handoff_record(record)
         new_path = sprint_path
@@ -3289,6 +3331,9 @@ def sprint_action_by_code(sprint_code: str):
         record_path = _update_sprint_record(record_path, "staged")
     elif action == "ship":
         record_path = _update_sprint_record(record_path, "shipped")
+    elif action == "done":
+        record_path = _mark_sprint_done(record, performed_by=str(session.get(WORKLOG_SESSION_KEY, {}).get("username") or session.get(WORKLOG_SESSION_KEY, {}).get("email") or "ui"))
+        return redirect(url_for("sprints", status="done"))
     elif action == "regenerate_handoff":
         regenerated, handoff_path, sprint_path = _regenerate_sprint_handoff_record(record)
         record_path = sprint_path

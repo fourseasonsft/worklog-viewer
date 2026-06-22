@@ -78,6 +78,13 @@
             </form>
             <a class="btn btn-outline-secondary" href="{{ url_for('sprints') }}">Back to Sprint Queue</a>
           {% else %}
+            {% if record.status_key in ['active', 'completed', 'staged'] or (record.status_key == 'approved') %}
+              <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                <input type="hidden" name="action" value="done">
+                <input type="hidden" name="confirm" value="mark this sprint done and move it to the done queue?">
+                <button class="btn btn-dark" type="submit">Mark Done</button>
+              </form>
+            {% endif %}
             <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
               <input type="hidden" name="action" value="rescind">
               <input type="hidden" name="confirm" value="rescind this sprint and return its ideas to inventory?">
@@ -186,6 +193,15 @@
             {% endif %}
           </div>
         </div>
+
+        {% if record.status_key == 'done' or record.reconciliation_pending %}
+          <div class="mt-4">
+            <div class="text-uppercase text-secondary small fw-semibold mb-2">Reconciliation Pending</div>
+            <div class="alert alert-secondary mb-0">
+              This sprint was marked done from the UI and requires Codex reconciliation.
+            </div>
+          </div>
+        {% endif %}
 
         <details class="mt-4">
           <summary class="text-uppercase text-secondary small fw-semibold">Debug metadata</summary>

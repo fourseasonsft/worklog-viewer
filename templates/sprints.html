@@ -69,7 +69,7 @@
                 <td class="text-nowrap fw-semibold">{{ record.sprint_code }}</td>
                 <td class="fw-semibold">{{ record.title }}</td>
                 <td><span class="badge text-bg-light border">{{ record.app_product }}</span></td>
-                <td><span class="badge {% if record.status_key == 'active' %}text-bg-primary{% elif record.status_key == 'approved' %}text-bg-warning{% elif record.status_key == 'completed' %}text-bg-secondary{% elif record.status_key == 'staged' %}text-bg-info{% elif record.status_key == 'shipped' %}text-bg-success{% else %}text-bg-light border{% endif %}">{{ record.status }}</span></td>
+                <td><span class="badge {% if record.status_key == 'active' %}text-bg-primary{% elif record.status_key == 'approved' %}text-bg-warning{% elif record.status_key == 'completed' %}text-bg-secondary{% elif record.status_key == 'staged' %}text-bg-info{% elif record.status_key == 'shipped' %}text-bg-success{% elif record.status_key == 'done' %}text-bg-dark{% elif record.status_key == 'reconciled' %}text-bg-success{% else %}text-bg-light border{% endif %}">{{ record.status }}</span></td>
                 <td>{{ record.idea_count }}</td>
                 <td>{{ record.scope }}</td>
                 <td class="text-nowrap">{{ record.created_at | display_timestamp }}</td>
@@ -102,6 +102,11 @@
                         <button class="btn btn-outline-secondary btn-sm" type="submit">Start Sprint</button>
                       </form>
                       <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="done">
+                        <input type="hidden" name="confirm" value="mark this sprint done and move it to the done queue?">
+                        <button class="btn btn-outline-dark btn-sm" type="submit">Mark Done</button>
+                      </form>
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
                         <input type="hidden" name="action" value="rescind">
                         <input type="hidden" name="confirm" value="rescind this sprint and return its ideas to inventory?">
                         <button class="btn btn-outline-warning btn-sm" type="submit">Rescind</button>
@@ -115,6 +120,11 @@
                       <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
                         <input type="hidden" name="action" value="complete">
                         <button class="btn btn-outline-secondary btn-sm" type="submit">Complete Sprint</button>
+                      </form>
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="done">
+                        <input type="hidden" name="confirm" value="mark this sprint done and move it to the done queue?">
+                        <button class="btn btn-outline-dark btn-sm" type="submit">Mark Done</button>
                       </form>
                       <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
                         <input type="hidden" name="action" value="rescind">
@@ -132,6 +142,11 @@
                         <button class="btn btn-outline-secondary btn-sm" type="submit">Mark Staged</button>
                       </form>
                       <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="done">
+                        <input type="hidden" name="confirm" value="mark this sprint done and move it to the done queue?">
+                        <button class="btn btn-outline-dark btn-sm" type="submit">Mark Done</button>
+                      </form>
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
                         <input type="hidden" name="action" value="rescind">
                         <input type="hidden" name="confirm" value="rescind this sprint and return its ideas to inventory?">
                         <button class="btn btn-outline-warning btn-sm" type="submit">Rescind</button>
@@ -145,6 +160,11 @@
                       <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
                         <input type="hidden" name="action" value="ship">
                         <button class="btn btn-outline-secondary btn-sm" type="submit">Mark Shipped</button>
+                      </form>
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="done">
+                        <input type="hidden" name="confirm" value="mark this sprint done and move it to the done queue?">
+                        <button class="btn btn-outline-dark btn-sm" type="submit">Mark Done</button>
                       </form>
                       <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
                         <input type="hidden" name="action" value="rescind">
@@ -167,6 +187,8 @@
                         <input type="hidden" name="confirm" value="delete this sprint record and return its ideas to inventory?">
                         <button class="btn btn-outline-danger btn-sm" type="submit">Delete</button>
                       </form>
+                    {% elif record.status_key == 'done' %}
+                      <span class="badge text-bg-dark align-self-center">Done</span>
                     {% endif %}
                   </div>
                 </td>
