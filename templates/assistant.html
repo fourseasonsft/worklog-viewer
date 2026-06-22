@@ -471,6 +471,7 @@
     bindArchiveButtons();
     syncSelectionUI();
   }
+  window.refreshIdeas = refreshIdeas;
 
   async function requestDigest(selectedOnly) {
     const selectedIdeaIds = selectedOnly ? selectedIds() : [];

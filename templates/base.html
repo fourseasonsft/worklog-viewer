@@ -245,6 +245,25 @@
         padding: 0.35rem 0.5rem;
         border-radius: 0.5rem;
       }
+      .quick-capture-launcher {
+        position: fixed;
+        right: 1.25rem;
+        bottom: 1.25rem;
+        width: 3.25rem;
+        height: 3.25rem;
+        border-radius: 999px;
+        box-shadow: 0 18px 36px rgba(37, 99, 235, 0.26);
+        z-index: 1060;
+      }
+      .quick-capture-modal .modal-dialog {
+        max-width: 560px;
+      }
+      .quick-capture-modal .modal-content {
+        border-radius: 1rem;
+      }
+      .quick-capture-modal textarea {
+        min-height: 160px;
+      }
     </style>
   </head>
   <body>
@@ -302,5 +321,125 @@
         </main>
       </div>
     </div>
+    <button class="btn btn-primary quick-capture-launcher" type="button" id="global-quick-capture-button" aria-label="Quick capture idea">
+      <span aria-hidden="true">💡</span>
+    </button>
+    <div class="modal fade" id="global-quick-capture-modal" tabindex="-1" aria-labelledby="global-quick-capture-title" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered quick-capture-modal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <div>
+              <div class="text-uppercase text-secondary small fw-semibold mb-1">Quick Capture</div>
+              <h2 class="modal-title h5 mb-0" id="global-quick-capture-title">Capture an idea anywhere in Worklog</h2>
+            </div>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div id="global-quick-capture-error" class="alert alert-danger d-none" role="alert"></div>
+            <div id="global-quick-capture-success" class="alert alert-success d-none" role="alert"></div>
+            <form id="global-quick-capture-form">
+              <div class="mb-3">
+                <label class="form-label" for="global-quick-capture-text">Idea</label>
+                <textarea class="form-control" id="global-quick-capture-text" name="message" placeholder="Capture a quick Worklog thought"></textarea>
+              </div>
+              <div class="mb-3">
+                <label class="form-label" for="global-quick-capture-app">App/Product</label>
+                <select class="form-select" id="global-quick-capture-app" name="app_product">
+                  <option value="">Auto-detect</option>
+                  <option value="Worklog">Worklog</option>
+                  <option value="IMS">IMS</option>
+                  <option value="Dispatch">Dispatch</option>
+                  <option value="CY Storage">CY Storage</option>
+                  <option value="Parking">Parking</option>
+                  <option value="Hiring">Hiring</option>
+                </select>
+              </div>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-primary" type="button" id="global-quick-capture-save">Save Idea</button>
+            <button class="btn btn-outline-secondary" type="button" id="global-quick-capture-cancel" data-bs-dismiss="modal">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      (() => {
+        const launcher = document.getElementById('global-quick-capture-button');
+        const modal = document.getElementById('global-quick-capture-modal');
+        const form = document.getElementById('global-quick-capture-form');
+        const text = document.getElementById('global-quick-capture-text');
+        const app = document.getElementById('global-quick-capture-app');
+        const save = document.getElementById('global-quick-capture-save');
+        const cancel = document.getElementById('global-quick-capture-cancel');
+        const errorBox = document.getElementById('global-quick-capture-error');
+        const successBox = document.getElementById('global-quick-capture-success');
+        if (!launcher || !modal || !form || !text || !save || !cancel) return;
+        const modalInstance = bootstrap.Modal.getOrCreateInstance(modal);
+        const clearAlerts = () => {
+          errorBox.classList.add('d-none');
+          errorBox.textContent = '';
+          successBox.classList.add('d-none');
+          successBox.textContent = '';
+        };
+        const saveIdea = async () => {
+          const message = text.value.trim();
+          if (!message) {
+            errorBox.textContent = 'Enter an idea first.';
+            errorBox.classList.remove('d-none');
+            return;
+          }
+          clearAlerts();
+          save.disabled = true;
+          save.textContent = 'Saving...';
+          try {
+            const payload = {message};
+            if (app.value) payload.app_product = app.value;
+            const res = await fetch('{{ url_for("assistant_message") }}', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+              throw new Error(data.error || 'Failed to save idea.');
+            }
+            successBox.textContent = 'Idea saved to Idea Inventory.';
+            successBox.classList.remove('d-none');
+            text.value = '';
+            modalInstance.hide();
+            if (window.location.pathname === '{{ url_for("assistant") }}' && typeof window.refreshIdeas === 'function') {
+              await window.refreshIdeas();
+            }
+          } catch (error) {
+            errorBox.textContent = error.message || 'Failed to save idea.';
+            errorBox.classList.remove('d-none');
+          } finally {
+            save.disabled = false;
+            save.textContent = 'Save Idea';
+          }
+        };
+        launcher.addEventListener('click', () => {
+          clearAlerts();
+          modalInstance.show();
+        });
+        modal.addEventListener('shown.bs.modal', () => {
+          text.focus();
+        });
+        modal.addEventListener('hidden.bs.modal', () => {
+          clearAlerts();
+          save.disabled = false;
+          save.textContent = 'Save Idea';
+        });
+        save.addEventListener('click', saveIdea);
+        cancel.addEventListener('click', clearAlerts);
+        form.addEventListener('submit', (event) => {
+          event.preventDefault();
+          saveIdea();
+        });
+        window.WorklogQuickCapture = { refreshOnSave: true };
+      })();
+    </script>
   </body>
 </html>

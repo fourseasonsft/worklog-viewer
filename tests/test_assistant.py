@@ -122,6 +122,13 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertNotIn('class="archive-button"', html)
         self.assertNotIn("Inventory Actions", html)
 
+    def test_base_layout_renders_global_quick_capture(self) -> None:
+        html = self._client().get("/assistant").get_data(as_text=True)
+        self.assertIn("global-quick-capture-button", html)
+        self.assertIn("global-quick-capture-modal", html)
+        self.assertIn("global-quick-capture-text", html)
+        self.assertIn("global-quick-capture-save", html)
+
     def test_message_stores_raw_idea(self) -> None:
         response = self._client().post(
             "/api/assistant/message",
