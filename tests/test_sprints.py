@@ -466,6 +466,58 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("restore_reason", restored_text)
         self.assertIn("Improve the IMS queue surface.", restored_text)
 
+    def test_proposed_rescind_restores_test_idea_to_active_inventory(self) -> None:
+        source = self.root / "04-inbox/thought-box/digested/2026-06-22-193423-test.md"
+        source.write_text(
+            "# test\n\n- created_at: 2026-06-22T19:34:23Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: test\n- ai_inferred_app: \n- ai_inferred_type: thought\n- ai_summary: test\n",
+            encoding="utf-8",
+        )
+        proposed = self.root / "06-sprints/proposed/pr-20260622193434-001-other-follow-up.md"
+        proposed.write_text(
+            "\n".join(
+                [
+                    "# Proposed Sprint Group: Other follow-up",
+                    "",
+                    "- proposal_id: pr-20260622193434-001",
+                    "- intended_sprint_code: OTHER-SPRINT-20260622-006",
+                    "- sprint_group_name: Other follow-up",
+                    "- app_product: Other",
+                    "- scope: Small",
+                    "- status: proposed",
+                    "- created_at: 2026-06-22T19:34:34.533360+00:00",
+                    "- updated_at: 2026-06-22T19:34:34.533360+00:00",
+                    "- source_thought_ids: 9f86d081884c7d65",
+                    "- source_thought_paths: 04-inbox/thought-box/digested/2026-06-22-193423-test.md",
+                    "",
+                    "## Source Ideas",
+                    "- test",
+                    "",
+                    "## Source Idea Summaries",
+                    "- test",
+                    "",
+                    "## Proposed Work",
+                    "- test",
+                    "",
+                    "## Handoff Preview",
+                    "# Sprint Handoff Preview",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        client = self._client()
+        record = viewer_app._sprint_record_by_id("pr-20260622193434-001")
+        self.assertIsNotNone(record)
+        response = client.post(
+            f"/sprints/{record['id']}/action",
+            data={"action": "rescind", "confirm": "rescind this sprint and return its ideas to inventory?"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        thoughts = client.get("/api/assistant/thoughts").get_json()["thoughts"]
+        self.assertTrue(any(thought["raw_text_full"] == "test" for thought in thoughts))
+        self.assertTrue(any(thought["digest_status"] == "not_digested" for thought in thoughts if thought["raw_text_full"] == "test"))
+
     def test_confirmation_routes_require_post(self) -> None:
         self._create_sprint_record("approved")
         response = self._client().get("/sprints/sp-20260620120000-approved/action")

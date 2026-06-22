@@ -820,6 +820,8 @@ def _recreate_restored_thought(source_path: str, summary: str, sprint_code: str,
     if not summary:
         return None, f"missing source idea: {source_path}"
     source_name = Path(source_path).name or _slugify_title(summary)
+    if not source_name.lower().endswith(".md"):
+        source_name = f"{Path(source_name).stem}.md"
     target = THOUGHT_BOX_DIR / source_name
     if target.exists():
         stem = target.stem
@@ -861,6 +863,8 @@ def _recreate_restored_thought(source_path: str, summary: str, sprint_code: str,
 
 def _normalize_restored_thought_file(path: Path, sprint_code: str, restore_reason: str, source_summary: str = "") -> None:
     if not path.exists():
+        return
+    if path.suffix.lower() != ".md":
         return
     parsed = _parse_thought_file(path)
     raw_text = str(parsed.get("raw_text_full") or source_summary or parsed.get("normalized_summary") or parsed.get("display_snippet") or parsed.get("title") or "").strip()
