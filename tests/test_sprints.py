@@ -444,20 +444,19 @@ class WorklogSprintQueueTests(unittest.TestCase):
 
     def test_approval_creates_sprint_record_and_handoff(self) -> None:
         preview = viewer_app._digest_preview(viewer_app._thought_box_items(digested_only=False))
-        response = self._client().post("/api/assistant/approve-digest", json={"digest_preview": preview})
+        response = self._client().post("/api/assistant/create-proposed-sprints", json={"digest_preview": preview, "action": "accept_suggested"})
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
-        self.assertTrue(body["created_sprints"])
-        self.assertTrue(body["created_handoffs"])
-        self.assertTrue(list((self.root / "06-sprints/approved").glob("*.md")))
-        self.assertTrue(list((self.root / "05-sprint-handoffs").glob("*.md")))
+        self.assertTrue(body["created_proposed_sprints"])
+        self.assertTrue(list((self.root / "06-sprints/proposed").glob("*.md")))
         self.assertTrue(list((self.root / "04-inbox/thought-box/digested").glob("*.md")))
-        record = viewer_app._sprint_records()[0]
+        record = viewer_app._proposed_sprint_records()[0]
         self.assertTrue(record["source_thought_paths"])
-        self.assertTrue(record["source_idea_summaries"])
-        self.assertIn("Completion Requirement", record["handoff_markdown"])
-        self.assertIn("Source Ideas", record["handoff_markdown"])
-        self.assertIn("mark the sprint staged", record["handoff_markdown"].lower())
+        self.assertTrue(record.get("source_ideas"))
+        text = (self.root / record["path"]).read_text(encoding="utf-8")
+        self.assertIn("Completion Requirement", text)
+        self.assertIn("Source Ideas", text)
+        self.assertIn("Sprint Code", text)
 
     def test_regenerate_handoff_repairs_source_sections(self) -> None:
         record_path = self._create_sprint_record("approved")

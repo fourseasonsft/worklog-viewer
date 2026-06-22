@@ -111,25 +111,46 @@
 
   <section class="card surface-card card-shadow border-0 mb-4">
     <div class="card-body p-4 p-xl-5">
-      <div class="text-uppercase text-secondary small fw-semibold mb-2">Digest Preview</div>
+      <div class="text-uppercase text-secondary small fw-semibold mb-2">Digest Grouping Review</div>
       <div id="digest-preview-empty" class="{% if digest_preview %}d-none{% endif %} text-secondary">
-        Request a digest to create proposed sprint groups. Review them in Sprint Queue.
+        Request a digest to review suggested groups before creating proposed sprint records.
       </div>
       <div id="digest-preview-body" class="{% if not digest_preview %}d-none{% endif %}">
         {% if digest_preview %}
+          <div class="card border-0 bg-body-tertiary mb-3">
+            <div class="card-body d-flex flex-wrap gap-3 justify-content-between align-items-center">
+              <div>
+                <div class="small text-secondary text-uppercase fw-semibold">Selected Ideas</div>
+                <div class="h4 mb-0" id="digest-selected-count">{{ digest_preview.selected_idea_count or digest_preview.source_idea_count or digest_preview.active_items|length }}</div>
+              </div>
+              <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-primary btn-sm" type="button" id="create-suggested-groups-button">Create Proposed Sprints from Suggested Groups</button>
+                <button class="btn btn-outline-primary btn-sm" type="button" id="combine-all-button">Combine All Into One Sprint</button>
+                <button class="btn btn-outline-secondary btn-sm" type="button" id="cancel-grouping-button">Cancel / Return to Inventory</button>
+              </div>
+            </div>
+          </div>
           <div class="table-responsive mb-3">
             <table class="table inbox-table align-middle mb-0">
               <thead>
                 <tr>
+                  <th>Group Name</th>
                   <th>App/Product</th>
-                  <th>Thoughts</th>
+                  <th>Ideas Included</th>
+                  <th>Scope</th>
+                  <th>Suggested Priority</th>
+                  <th>Actions / Selection</th>
                 </tr>
               </thead>
-              <tbody id="digest-app-table">
-                {% for row in digest_preview.app_groups %}
+              <tbody id="digest-sprint-table">
+                {% for group in digest_preview.sprint_groups %}
                   <tr>
-                    <td>{{ row.app_product }}</td>
-                    <td>{{ row.thought_count }}</td>
+                    <td class="fw-semibold">{{ group.sprint_group_name }}</td>
+                    <td>{{ group.app_product }}</td>
+                    <td>{{ group.ideas_included }}</td>
+                    <td>{{ group.scope }}</td>
+                    <td>{{ group.suggested_priority }}</td>
+                    <td><input class="form-check-input" type="checkbox" checked disabled> <span class="text-secondary small ms-2">Suggested</span></td>
                   </tr>
                 {% endfor %}
               </tbody>
@@ -139,27 +160,20 @@
             <table class="table inbox-table align-middle mb-0">
               <thead>
                 <tr>
-                  <th>App/Product</th>
-                  <th>Sprint Group Name</th>
-                  <th>Ideas Included</th>
-                  <th>Proposed Type</th>
-                  <th>Feasibility</th>
-                  <th>Suggested Priority</th>
-                  <th>Recommended First Step</th>
-                  <th>Handoff MD</th>
+                  <th>Created</th>
+                  <th>Raw Thought</th>
+                  <th>Inferred App/Product</th>
                 </tr>
               </thead>
-              <tbody id="digest-sprint-table">
-                {% for group in digest_preview.sprint_groups %}
+              <tbody id="digest-source-table">
+                {% for item in digest_preview.active_items %}
                   <tr>
-                    <td>{{ group.app_product }}</td>
-                    <td class="fw-semibold">{{ group.sprint_group_name }}</td>
-                    <td>{{ group.ideas_included }}</td>
-                    <td>{{ group.proposed_type }}</td>
-                    <td>{{ group.feasibility }}</td>
-                    <td>{{ group.suggested_priority }}</td>
-                    <td>{{ group.recommended_first_step }}</td>
-                    <td><a href="/sprints?status=proposed">{{ group.sprint_group_name|lower|replace(' ', '-') }}.md</a></td>
+                    <td class="text-nowrap">{{ item.created_display or item.created_at or item.mtime_display or 'Unknown' }}</td>
+                    <td>
+                      <div class="fw-semibold">{{ item.title }}</div>
+                      <div class="text-secondary small">{{ item.display_snippet or item.normalized_summary or 'No raw text recorded.' }}</div>
+                    </td>
+                    <td><span class="badge text-bg-light border">{{ item.ai_inferred_app or 'Other' }}</span></td>
                   </tr>
                 {% endfor %}
               </tbody>
@@ -187,8 +201,12 @@
   const input = form.querySelector('textarea[name="message"]');
   const previewBody = document.getElementById('digest-preview-body');
   const previewEmpty = document.getElementById('digest-preview-empty');
-  const digestAppTable = document.getElementById('digest-app-table');
+  const digestSelectedCount = document.getElementById('digest-selected-count');
   const digestSprintTable = document.getElementById('digest-sprint-table');
+  const digestSourceTable = document.getElementById('digest-source-table');
+  const createSuggestedGroupsButton = document.getElementById('create-suggested-groups-button');
+  const combineAllButton = document.getElementById('combine-all-button');
+  const cancelGroupingButton = document.getElementById('cancel-grouping-button');
   const ideaInventoryBody = document.getElementById('idea-inventory-body');
   const selectedCountBadge = document.getElementById('selected-count-badge');
   const selectionStatus = document.getElementById('selection-status');
@@ -232,30 +250,59 @@
     clearDigestResult();
     previewEmpty.classList.add('d-none');
     previewBody.classList.remove('d-none');
-    if (digestAppTable) {
-      digestAppTable.innerHTML = '';
-      (data.app_groups || []).forEach((row) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${row.app_product || ''}</td><td>${row.thought_count || 0}</td>`;
-        digestAppTable.appendChild(tr);
-      });
+    if (digestSelectedCount) {
+      digestSelectedCount.textContent = data.selected_idea_count || data.source_idea_count || (data.active_items || []).length || 0;
     }
     if (digestSprintTable) {
       digestSprintTable.innerHTML = '';
       (data.sprint_groups || []).forEach((group) => {
         const tr = document.createElement('tr');
         tr.innerHTML = `
-          <td>${group.app_product || ''}</td>
           <td class="fw-semibold">${group.sprint_group_name || ''}</td>
+          <td>${group.app_product || ''}</td>
           <td>${group.ideas_included || 0}</td>
-          <td>${group.proposed_type || ''}</td>
-          <td>${group.feasibility || ''}</td>
+          <td>${group.scope || ''}</td>
           <td>${group.suggested_priority || ''}</td>
-          <td>${group.recommended_first_step || ''}</td>
-          <td><code class="small">${(group.sprint_group_name || '').toLowerCase().replace(/\s+/g, '-')}.md</code></td>
+          <td><input class="form-check-input" type="checkbox" checked disabled> <span class="text-secondary small ms-2">Suggested</span></td>
         `;
         digestSprintTable.appendChild(tr);
       });
+    }
+    if (digestSourceTable) {
+      digestSourceTable.innerHTML = '';
+      (data.active_items || []).forEach((item) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="text-nowrap">${item.created_display || item.created_at || item.mtime_display || 'Unknown'}</td>
+          <td>
+            <div class="fw-semibold">${item.title || ''}</div>
+            <div class="text-secondary small">${item.display_snippet || item.normalized_summary || 'No raw text recorded.'}</div>
+          </td>
+          <td><span class="badge text-bg-light border">${item.ai_inferred_app || 'Other'}</span></td>
+        `;
+        digestSourceTable.appendChild(tr);
+      });
+    }
+  }
+
+  async function finalizeDigest(action) {
+    if (!digestPreview) return;
+    clearDigestResult();
+    const res = await fetch('{{ url_for("assistant_create_proposed_sprints") }}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({digest_preview: digestPreview, action}),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showDigestResult(data.error || 'Failed to create proposed sprints.', 'danger');
+      return;
+    }
+    showDigestResult(data.assistant_reply || 'Proposed sprint groups created.', action === 'cancel' ? 'secondary' : 'success', action === 'cancel' ? [] : [
+      '<a class="btn btn-sm btn-outline-primary" href="/sprints?status=proposed">Open Sprint Queue</a>',
+    ]);
+    if (action !== 'cancel') {
+      await refreshIdeas();
     }
   }
 
@@ -396,6 +443,9 @@
     });
     digestSelectedButton?.addEventListener('click', () => requestDigest(true));
     digestAllButton?.addEventListener('click', () => requestDigest(false));
+    createSuggestedGroupsButton?.addEventListener('click', () => finalizeDigest('accept_suggested'));
+    combineAllButton?.addEventListener('click', () => finalizeDigest('combine_all'));
+    cancelGroupingButton?.addEventListener('click', () => finalizeDigest('cancel'));
     archiveSelectedButton?.addEventListener('click', async () => {
       const thought_paths = Array.from(document.querySelectorAll('.idea-select:checked')).map((checkbox) => checkbox.dataset.thoughtPath || checkbox.closest('tr')?.dataset.thoughtPath || checkbox.value);
       if (!thought_paths.length) {
