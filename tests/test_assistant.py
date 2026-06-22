@@ -97,6 +97,7 @@ class WorklogAssistantTests(unittest.TestCase):
         html = response.get_data(as_text=True)
         self.assertIn("Idea Inventory digest to sprint groups", html)
         self.assertIn("Active Idea Inventory", html)
+        self.assertIn("digest-grouping-review-modal", html)
         self.assertNotIn("Digest by App/Product", html)
         self.assertNotIn("Proposed Sprint Groups", html)
         self.assertNotIn("Approved Sprint Queue", html)
@@ -225,8 +226,9 @@ class WorklogAssistantTests(unittest.TestCase):
         )
         html = self._client().get("/assistant?digest_preview=1").get_data(as_text=True)
         self.assertIn("<table", html)
-        self.assertIn("Digest Grouping Review", html)
-        self.assertIn("review suggested groups", html.lower())
+        self.assertIn("digest-grouping-review-modal", html)
+        self.assertIn("review suggested sprint groups before creating proposals", html.lower())
+        self.assertIn("new bootstrap.Modal", html)
 
     def test_create_proposed_sprints_from_suggested_groups(self) -> None:
         self._write_thought(

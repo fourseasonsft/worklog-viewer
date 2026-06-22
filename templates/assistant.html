@@ -109,84 +109,95 @@
     </div>
   </section>
 
-  <section class="card surface-card card-shadow border-0 mb-4">
-    <div class="card-body p-4 p-xl-5">
-      <div class="text-uppercase text-secondary small fw-semibold mb-2">Digest Grouping Review</div>
-      <div id="digest-preview-empty" class="{% if digest_preview %}d-none{% endif %} text-secondary">
-        Request a digest to review suggested groups before creating proposed sprint records.
-      </div>
-      <div id="digest-preview-body" class="{% if not digest_preview %}d-none{% endif %}">
-        {% if digest_preview %}
-          <div class="card border-0 bg-body-tertiary mb-3">
-            <div class="card-body d-flex flex-wrap gap-3 justify-content-between align-items-center">
-              <div>
-                <div class="small text-secondary text-uppercase fw-semibold">Selected Ideas</div>
-                <div class="h4 mb-0" id="digest-selected-count">{{ digest_preview.selected_idea_count or digest_preview.source_idea_count or digest_preview.active_items|length }}</div>
-              </div>
-              <div class="d-flex flex-wrap gap-2">
-                <button class="btn btn-primary btn-sm" type="button" id="create-suggested-groups-button">Create Proposed Sprints from Suggested Groups</button>
-                <button class="btn btn-outline-primary btn-sm" type="button" id="combine-all-button">Combine All Into One Sprint</button>
-                <button class="btn btn-outline-secondary btn-sm" type="button" id="cancel-grouping-button">Cancel / Return to Inventory</button>
-              </div>
-            </div>
-          </div>
-          <div class="table-responsive mb-3">
-            <table class="table inbox-table align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Group Name</th>
-                  <th>App/Product</th>
-                  <th>Ideas Included</th>
-                  <th>Scope</th>
-                  <th>Suggested Priority</th>
-                  <th>Actions / Selection</th>
-                </tr>
-              </thead>
-              <tbody id="digest-sprint-table">
-                {% for group in digest_preview.sprint_groups %}
-                  <tr>
-                    <td class="fw-semibold">{{ group.sprint_group_name }}</td>
-                    <td>{{ group.app_product }}</td>
-                    <td>{{ group.ideas_included }}</td>
-                    <td>{{ group.scope }}</td>
-                    <td>{{ group.suggested_priority }}</td>
-                    <td><input class="form-check-input" type="checkbox" checked disabled> <span class="text-secondary small ms-2">Suggested</span></td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-          <div class="table-responsive">
-            <table class="table inbox-table align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Created</th>
-                  <th>Raw Thought</th>
-                  <th>Inferred App/Product</th>
-                </tr>
-              </thead>
-              <tbody id="digest-source-table">
-                {% for item in digest_preview.active_items %}
-                  <tr>
-                    <td class="text-nowrap">{{ item.created_display or item.created_at or item.mtime_display or 'Unknown' }}</td>
-                    <td>
-                      <div class="fw-semibold">{{ item.title }}</div>
-                      <div class="text-secondary small">{{ item.display_snippet or item.normalized_summary or 'No raw text recorded.' }}</div>
-                    </td>
-                    <td><span class="badge text-bg-light border">{{ item.ai_inferred_app or 'Other' }}</span></td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% endif %}
-      </div>
-    </div>
-  </section>
-
   <section class="mb-4">
     <div id="digest-result" class="alert d-none" role="alert"></div>
   </section>
+</div>
+
+<div class="modal fade" id="digest-grouping-review-modal" tabindex="-1" aria-labelledby="digest-grouping-review-title" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <div class="text-uppercase text-secondary small fw-semibold mb-1">Digest Grouping Review</div>
+          <h2 class="modal-title h5 mb-0" id="digest-grouping-review-title">Review suggested sprint groups before creating proposals</h2>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="digest-preview-empty" class="{% if digest_preview %}d-none{% endif %} text-secondary">
+          Request a digest to review suggested groups before creating proposed sprint records.
+        </div>
+        <div id="digest-preview-body" class="{% if not digest_preview %}d-none{% endif %}">
+          {% if digest_preview %}
+            <div class="card border-0 bg-body-tertiary mb-3">
+              <div class="card-body d-flex flex-wrap gap-3 justify-content-between align-items-center">
+                <div>
+                  <div class="small text-secondary text-uppercase fw-semibold">Selected Ideas</div>
+                  <div class="h4 mb-0" id="digest-selected-count">{{ digest_preview.selected_idea_count or digest_preview.source_idea_count or digest_preview.active_items|length }}</div>
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                  <button class="btn btn-primary btn-sm" type="button" id="create-suggested-groups-button">Create Proposed Sprints from Suggested Groups</button>
+                  <button class="btn btn-outline-primary btn-sm" type="button" id="combine-all-button">Combine All Into One Sprint</button>
+                  <button class="btn btn-outline-secondary btn-sm" type="button" id="cancel-grouping-button">Cancel / Return to Inventory</button>
+                </div>
+              </div>
+            </div>
+            <div class="table-responsive mb-3">
+              <table class="table inbox-table align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Group Name</th>
+                    <th>App/Product</th>
+                    <th>Ideas Included</th>
+                    <th>Scope</th>
+                    <th>Suggested Priority</th>
+                    <th>Actions / Selection</th>
+                  </tr>
+                </thead>
+                <tbody id="digest-sprint-table">
+                  {% for group in digest_preview.sprint_groups %}
+                    <tr>
+                      <td class="fw-semibold">{{ group.sprint_group_name }}</td>
+                      <td>{{ group.app_product }}</td>
+                      <td>{{ group.ideas_included }}</td>
+                      <td>{{ group.scope }}</td>
+                      <td>{{ group.suggested_priority }}</td>
+                      <td><input class="form-check-input" type="checkbox" checked disabled> <span class="text-secondary small ms-2">Suggested</span></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <div class="table-responsive">
+              <table class="table inbox-table align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Created</th>
+                    <th>Raw Thought</th>
+                    <th>Inferred App/Product</th>
+                  </tr>
+                </thead>
+                <tbody id="digest-source-table">
+                  {% for item in digest_preview.active_items %}
+                    <tr>
+                      <td class="text-nowrap">{{ item.created_display or item.created_at or item.mtime_display or 'Unknown' }}</td>
+                      <td>
+                        <div class="fw-semibold">{{ item.title }}</div>
+                        <div class="text-secondary small">{{ item.display_snippet or item.normalized_summary or 'No raw text recorded.' }}</div>
+                      </td>
+                      <td><span class="badge text-bg-light border">{{ item.ai_inferred_app or 'Other' }}</span></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% endif %}
+        </div>
+        <div id="digest-modal-result" class="alert d-none mt-3 mb-0" role="alert"></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -211,7 +222,9 @@
   const selectedCountBadge = document.getElementById('selected-count-badge');
   const selectionStatus = document.getElementById('selection-status');
   const digestResult = document.getElementById('digest-result');
-  const digestGroupingReview = document.getElementById('digest-grouping-review');
+  const digestModal = document.getElementById('digest-grouping-review-modal');
+  const digestModalResult = document.getElementById('digest-modal-result');
+  const digestModalInstance = digestModal ? new bootstrap.Modal(digestModal) : null;
   let digestPreview = {{ digest_preview | tojson if digest_preview else 'null' }};
 
   function selectedCheckboxes() {
@@ -228,10 +241,22 @@
     digestResult.innerHTML = '';
   }
 
+  function clearDigestModalResult() {
+    if (!digestModalResult) return;
+    digestModalResult.className = 'alert d-none mt-3 mb-0';
+    digestModalResult.innerHTML = '';
+  }
+
   function showDigestResult(message, variant = 'success', links = []) {
     if (!digestResult) return;
     digestResult.className = `alert alert-${variant}`;
     digestResult.innerHTML = `${message}${links.length ? `<div class="mt-2 d-flex flex-wrap gap-2">${links.join('')}</div>` : ''}`;
+  }
+
+  function showDigestModalResult(message, variant = 'success', links = []) {
+    if (!digestModalResult) return;
+    digestModalResult.className = `alert alert-${variant} mt-3 mb-0`;
+    digestModalResult.innerHTML = `${message}${links.length ? `<div class="mt-2 d-flex flex-wrap gap-2">${links.join('')}</div>` : ''}`;
   }
 
   function syncSelectionUI() {
@@ -249,6 +274,7 @@
   function renderPreview(data) {
     digestPreview = data;
     clearDigestResult();
+    clearDigestModalResult();
     previewEmpty.classList.add('d-none');
     previewBody.classList.remove('d-none');
     if (digestSelectedCount) {
@@ -284,13 +310,12 @@
         digestSourceTable.appendChild(tr);
       });
     }
-    digestGroupingReview?.classList.remove('d-none');
-    digestGroupingReview?.scrollIntoView({behavior: 'smooth', block: 'start'});
+    digestModalInstance?.show();
   }
 
   async function finalizeDigest(action) {
     if (!digestPreview) return;
-    clearDigestResult();
+    clearDigestModalResult();
     const res = await fetch('{{ url_for("assistant_create_proposed_sprints") }}', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -298,15 +323,18 @@
     });
     const data = await res.json();
     if (!res.ok) {
-      showDigestResult(data.error || 'Failed to create proposed sprints.', 'danger');
+      showDigestModalResult(data.error || 'Failed to create proposed sprints.', 'danger');
       return;
     }
-    showDigestResult(data.assistant_reply || 'Proposed sprint groups created.', action === 'cancel' ? 'secondary' : 'success', action === 'cancel' ? [] : [
+    if (action === 'cancel') {
+      digestModalInstance?.hide();
+      return;
+    }
+    digestModalInstance?.hide();
+    showDigestResult(data.assistant_reply || 'Proposed sprint groups created.', 'success', [
       '<a class="btn btn-sm btn-outline-primary" href="/sprints?status=proposed">Open Sprint Queue</a>',
     ]);
-    if (action !== 'cancel') {
-      await refreshIdeas();
-    }
+    await refreshIdeas();
   }
 
   async function refreshIdeas() {
@@ -368,7 +396,6 @@
       return;
     }
     renderPreview(data.digest_preview);
-    showDigestResult('Digest Grouping Review ready. Confirm the grouping before proposed sprint records are created.', 'success');
     status.textContent = 'Digest Grouping Review ready.';
   }
 
