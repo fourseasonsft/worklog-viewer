@@ -1018,6 +1018,18 @@ def _dedupe_text_list(items: list[str]) -> list[str]:
     return deduped
 
 
+def _canonical_idea_count(
+    source_ideas: list[str] | None = None,
+    *,
+    canonical_source_ideas: list[str] | None = None,
+) -> int:
+    if canonical_source_ideas is not None:
+        return len(_dedupe_text_list([str(item) for item in canonical_source_ideas]))
+    if source_ideas is not None:
+        return len(_dedupe_text_list([str(item) for item in source_ideas]))
+    return 0
+
+
 def _restore_source_ideas_for_record(record: dict[str, object], restore_reason: str = "rescinded") -> tuple[list[str], list[str], dict[str, int]]:
     restored: list[str] = []
     warnings: list[str] = []
@@ -1178,6 +1190,7 @@ def _parse_proposed_sprint_record(path: Path) -> dict[str, object]:
         "source_ideas": _dedupe_text_list(source_ideas),
         "source_idea_summaries": _dedupe_text_list(source_ideas),
         "canonical_source_ideas": _dedupe_text_list(source_ideas),
+        "idea_count": _canonical_idea_count(canonical_source_ideas=_dedupe_text_list(source_ideas)),
         "proposed_work": _dedupe_text_list(proposed_work),
         "canonical_proposed_work": _dedupe_text_list(proposed_work),
         "recommended_first_step": meta.get("recommended_first_step") or _extract_section_text(text, "Recommended First Step"),
@@ -1403,6 +1416,7 @@ def _write_sprint_record(group: dict[str, object], status: str = "approved") -> 
     source_idea_summaries = [str(item) for item in group.get("source_idea_summaries", [])]
     source_thought_paths = [str(item) for item in group.get("source_thought_paths", [])]
     digested_thoughts = [str(item) for item in group.get("digested_source_thoughts", [])]
+    canonical_source_ideas = [str(item) for item in group.get("canonical_source_ideas", [])]
     app_product = str(group.get("app_product") or "Other")
     handoff_path = str(group.get("handoff_path") or "")
     text = "\n".join(
@@ -1414,7 +1428,7 @@ def _write_sprint_record(group: dict[str, object], status: str = "approved") -> 
             f"- app_product: {app_product}",
             f"- status: {status}",
             f"- scope: {group.get('scope') or 'Small'}",
-            f"- idea_count: {group.get('ideas_included') or len(source_thoughts)}",
+            f"- idea_count: {_canonical_idea_count(canonical_source_ideas=canonical_source_ideas or source_idea_summaries or source_thoughts)}",
             f"- created_at: {group.get('created_at') or datetime.now(timezone.utc).isoformat()}",
             f"- updated_at: {datetime.now(timezone.utc).isoformat()}",
             f"- handoff_path: {handoff_path}",
@@ -1513,7 +1527,9 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
         "app_product": app_product,
         "status": status.title(),
         "status_key": status.lower(),
-        "idea_count": int(meta.get("idea_count") or len(source_thoughts) or 0),
+        "idea_count": _canonical_idea_count(
+            canonical_source_ideas=_dedupe_text_list(source_idea_summaries or source_ideas or source_thoughts)
+        ),
         "scope": meta.get("scope") or "Small",
         "created_at": meta.get("created_at") or _format_file_timestamp(path),
         "updated_at": meta.get("updated_at") or _format_file_timestamp(path),

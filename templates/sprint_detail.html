@@ -120,9 +120,11 @@
               </tr>
             </thead>
             <tbody>
-              {% for thought in record.source_thought_paths or record.digested_source_thoughts or record.source_thoughts %}
+              {% set canonical_sources = record.canonical_source_ideas or record.source_idea_summaries or record.source_ideas or record.source_thoughts %}
+              {% set source_paths = record.source_thought_paths or record.proposed_source_thoughts or record.digested_source_thoughts or record.source_thoughts %}
+              {% for thought in source_paths %}
                 <tr>
-                  <td>{{ record.source_idea_summaries[loop.index0] if record.source_idea_summaries and loop.index0 < record.source_idea_summaries|length else (record.source_thoughts[loop.index0] if record.source_thoughts and loop.index0 < record.source_thoughts|length else thought.split('/')[-1].replace('.md', '').replace('-', ' ').title()) }}</td>
+                  <td>{{ canonical_sources[loop.index0] if canonical_sources and loop.index0 < canonical_sources|length else thought.split('/')[-1].replace('.md', '').replace('-', ' ').title() }}</td>
                   <td><a href="{{ url_for('view_file', relative_path=thought) }}">Open source thought</a></td>
                 </tr>
               {% else %}
@@ -141,7 +143,7 @@
               </tr>
             </thead>
             <tbody>
-              {% for item in record.proposed_work %}
+              {% for item in record.canonical_proposed_work or record.proposed_work %}
                 <tr><td>{{ item }}</td></tr>
               {% else %}
                 <tr><td class="text-secondary">No proposed work recorded.</td></tr>

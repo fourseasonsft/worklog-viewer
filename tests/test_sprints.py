@@ -594,6 +594,81 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("Handoff Preview", visible)
         self.assertIn("Codex Prompt", visible)
 
+    def test_sprint_queue_idea_count_uses_canonical_source_ideas(self) -> None:
+        path = self.root / "06-sprints/approved/sp-20260622000000-queue-count.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "\n".join(
+                [
+                    "# Sprint Queue Record: Queue Count",
+                    "",
+                    "- sprint_id: sp-20260622000000-approved",
+                    "- sprint_code: WL-SPRINT-20260622-100",
+                    "- app_product: Worklog",
+                    "- status: approved",
+                    "- scope: Small",
+                    "- idea_count: 2",
+                    "- created_at: 2026-06-22T20:00:00Z",
+                    "- updated_at: 2026-06-22T20:00:00Z",
+                    "",
+                    "## Source Ideas",
+                    "- Test123.",
+                    "- Test123.",
+                    "",
+                    "## Source Idea Summaries",
+                    "- Test123.",
+                    "- Test123.",
+                    "",
+                    "## Proposed Work",
+                    "- Test123.",
+                    "- Test123.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        record = viewer_app._parse_sprint_record(path)
+        self.assertEqual(record["idea_count"], 1)
+        self.assertEqual(record["canonical_source_ideas"], ["Test123."])
+
+    def test_proposed_queue_idea_count_uses_canonical_source_ideas(self) -> None:
+        path = self.root / "06-sprints/proposed/pr-20260622000000-queue-count.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "\n".join(
+                [
+                    "# Proposed Sprint Group: Queue Count",
+                    "",
+                    "- proposal_id: pr-20260622000000-queue",
+                    "- intended_sprint_code: WL-SPRINT-20260622-101",
+                    "- sprint_group_name: Queue Count",
+                    "- app_product: Worklog",
+                    "- scope: Small",
+                    "- status: proposed",
+                    "- created_at: 2026-06-22T20:00:00Z",
+                    "- updated_at: 2026-06-22T20:00:00Z",
+                    "- source_thought_paths: 04-inbox/thought-box/test123.md",
+                    "",
+                    "## Source Ideas",
+                    "- Test123.",
+                    "- Test123.",
+                    "",
+                    "## Source Idea Summaries",
+                    "- Test123.",
+                    "- Test123.",
+                    "",
+                    "## Proposed Work",
+                    "- Test123.",
+                    "- Test123.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        record = viewer_app._parse_proposed_sprint_record(path)
+        self.assertEqual(record["idea_count"], 1)
+        self.assertEqual(record["canonical_source_ideas"], ["Test123."])
+
     def test_confirmation_routes_require_post(self) -> None:
         self._create_sprint_record("approved")
         response = self._client().get("/sprints/sp-20260620120000-approved/action")

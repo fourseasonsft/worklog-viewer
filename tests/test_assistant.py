@@ -572,6 +572,7 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertEqual(record["canonical_source_ideas"], ["Test123."])
         self.assertEqual(record["source_ideas"], ["Test123."])
         self.assertEqual(record["proposed_work"], ["Test123."])
+        self.assertEqual(record["idea_count"], 1)
 
     def test_no_thoughts_empty_state_works(self) -> None:
         html = self._client().get("/assistant").get_data(as_text=True)
