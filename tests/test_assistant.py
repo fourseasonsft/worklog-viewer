@@ -205,11 +205,34 @@ class WorklogAssistantTests(unittest.TestCase):
                 "selected_only": True,
             },
         ).get_json()["digest_preview"]
+        self.assertIn("active_items", preview)
+        self.assertIn("sprint_groups", preview)
         self.assertEqual(preview["selected_idea_count"], 2)
         self.assertEqual(len(preview["selected_thought_ids"]), 2)
         self.assertEqual(len(preview["source_thought_paths"]), 2)
         self.assertGreaterEqual(len(preview["sprint_groups"]), 1)
         self.assertGreaterEqual(len(preview["active_items"]), 2)
+
+    def test_digest_preview_surface_uses_selected_items(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-worklog.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Worklog idea inventory rows need to be clickable.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Worklog idea inventory rows need to be clickable.\n",
+        )
+        self._write_thought(
+            "2026-06-20-100001-worklog-2.md",
+            "# Worklog 2\n\n- created_at: 2026-06-20T10:00:01Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Worklog sprint queue needs cleaner handoff cards.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Worklog sprint queue needs cleaner handoff cards.\n",
+        )
+        preview = self._client().post(
+            "/api/assistant/digest-preview",
+            json={
+                "selected_idea_ids": [item["thought_id"] for item in viewer_app._thought_box_items(digested_only=False)],
+                "selected_only": True,
+            },
+        ).get_json()["digest_preview"]
+        self.assertEqual(preview["selection_mode"], "selected")
+        self.assertEqual(preview["selected_idea_count"], 2)
+        self.assertEqual(len(preview["active_items"]), 2)
+        self.assertEqual(len(preview["sprint_groups"]), 1)
 
     def test_digest_all_includes_all_active_ideas(self) -> None:
         self._write_thought(

@@ -284,6 +284,49 @@
     digestModalResult.innerHTML = `${message}${links.length ? `<div class="mt-2 d-flex flex-wrap gap-2">${links.join('')}</div>` : ''}`;
   }
 
+  function resolveSourceIdeas(payload) {
+    const sourceIdeas = [];
+    const seen = new Set();
+    function addItem(item) {
+      if (!item || typeof item !== 'object') return;
+      const key = item.thought_id || item.path || item.normalized_summary || item.title || JSON.stringify(item);
+      if (seen.has(key)) return;
+      seen.add(key);
+      sourceIdeas.push(item);
+    }
+    [
+      payload?.source_ideas,
+      payload?.active_items,
+      payload?.selected_ideas,
+    ].forEach((items) => {
+      if (Array.isArray(items)) items.forEach(addItem);
+    });
+    const groupCollections = [payload?.sprint_groups, payload?.suggested_groups, payload?.groups];
+    groupCollections.forEach((groups) => {
+      if (!Array.isArray(groups)) return;
+      groups.forEach((group) => {
+        if (Array.isArray(group?.thoughts)) group.thoughts.forEach(addItem);
+      });
+    });
+    return sourceIdeas;
+  }
+
+  function resolveSprintGroups(payload) {
+    const groups = [];
+    const seen = new Set();
+    function addGroup(group) {
+      if (!group || typeof group !== 'object') return;
+      const key = group.sprint_code || group.sprint_group_name || JSON.stringify(group);
+      if (seen.has(key)) return;
+      seen.add(key);
+      groups.push(group);
+    }
+    [payload?.suggested_groups, payload?.sprint_groups, payload?.groups].forEach((items) => {
+      if (Array.isArray(items)) items.forEach(addGroup);
+    });
+    return groups;
+  }
+
   function syncSelectionUI() {
     const count = selectedCheckboxes().length;
     selectedCountBadge.textContent = `${count} selected`;
@@ -309,12 +352,12 @@
     clearDigestModalResult();
     previewEmpty.classList.add('d-none');
     previewBody.classList.remove('d-none');
-    const sourceItems = (data.active_items && data.active_items.length)
-      ? data.active_items
-      : (data.sprint_groups || []).flatMap((group) => group.thoughts || []);
+    console.debug('digest-preview full payload', data);
+    const sourceItems = resolveSourceIdeas(data);
+    const sprintGroups = resolveSprintGroups(data);
     console.debug('digest-preview payload received', {
       source_idea_count: sourceItems.length,
-      suggested_group_count: (data.sprint_groups || []).length,
+      suggested_group_count: sprintGroups.length,
       selected_idea_count: data.selected_idea_count || data.source_idea_count || 0,
     });
     if (digestSelectedCount) {
@@ -322,7 +365,11 @@
     }
     if (digestSprintTable) {
       digestSprintTable.innerHTML = '';
-      (data.sprint_groups || []).forEach((group) => {
+      const groupsToRender = sprintGroups.length ? sprintGroups : [];
+      if (!groupsToRender.length) {
+        digestSprintTable.innerHTML = '<tr><td colspan="6" class="text-secondary">No suggested sprint groups found.</td></tr>';
+      }
+      groupsToRender.forEach((group) => {
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td class="fw-semibold">${group.sprint_group_name || ''}</td>
@@ -337,6 +384,9 @@
     }
     if (digestSourceTable) {
       digestSourceTable.innerHTML = '';
+      if (!sourceItems.length) {
+        digestSourceTable.innerHTML = '<tr><td colspan="3" class="text-secondary">No source ideas found in digest payload.</td></tr>';
+      }
       sourceItems.forEach((item) => {
         const tr = document.createElement('tr');
         tr.innerHTML = `
