@@ -272,6 +272,17 @@
           {% endfor %}
         </aside>
         <main class="col-12 col-md-9 col-xl-10 p-4">
+          {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+              <div class="mb-4">
+                {% for category, message in messages %}
+                  <div class="alert alert-{{ 'success' if category == 'success' else 'warning' if category == 'warning' else 'secondary' }} card-shadow mb-2" role="alert">
+                    {{ message }}
+                  </div>
+                {% endfor %}
+              </div>
+            {% endif %}
+          {% endwith %}
           {% block content %}{% endblock %}
         </main>
       </div>

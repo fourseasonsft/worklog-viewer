@@ -312,9 +312,12 @@ class WorklogSprintQueueTests(unittest.TestCase):
         record = viewer_app._sprint_records()[0]
         response = client.post(f"/sprints/{record['id']}/action", data={"action": "rescind", "confirm": "rescind this sprint and return its ideas to inventory?"}, follow_redirects=True)
         self.assertEqual(response.status_code, 200)
+        self.assertIn("Restored", response.get_data(as_text=True))
         self.assertTrue(list((self.root / "06-sprints/rescinded").glob("*.md")))
-        self.assertTrue((self.root / "04-inbox/thought-box/ims-ui.md").exists())
-        self.assertTrue((self.root / "04-inbox/thought-box/worklog-queue.md").exists())
+        thoughts = client.get("/api/assistant/thoughts").get_json()["thoughts"]
+        self.assertTrue(any(thought["raw_text_full"] == "Improve the IMS queue surface." for thought in thoughts))
+        self.assertTrue(any(thought["raw_text_full"] == "Tighten Worklog queue filtering." for thought in thoughts))
+        self.assertTrue(all(thought["digest_status"] == "not_digested" for thought in thoughts if thought["raw_text_full"] in {"Improve the IMS queue surface.", "Tighten Worklog queue filtering."}))
 
     def test_proposed_delete_restores_ideas(self) -> None:
         self._create_proposed_sprint_record()
@@ -322,9 +325,11 @@ class WorklogSprintQueueTests(unittest.TestCase):
         record = viewer_app._sprint_records()[0]
         response = client.post(f"/sprints/{record['id']}/action", data={"action": "delete", "confirm": "delete this sprint record and return its ideas to inventory?"}, follow_redirects=True)
         self.assertEqual(response.status_code, 200)
+        self.assertIn("Restored", response.get_data(as_text=True))
         self.assertTrue(list((self.root / "06-sprints/deleted").glob("*.md")))
-        self.assertTrue((self.root / "04-inbox/thought-box/ims-ui.md").exists())
-        self.assertTrue((self.root / "04-inbox/thought-box/worklog-queue.md").exists())
+        thoughts = client.get("/api/assistant/thoughts").get_json()["thoughts"]
+        self.assertTrue(any(thought["raw_text_full"] == "Improve the IMS queue surface." for thought in thoughts))
+        self.assertTrue(any(thought["raw_text_full"] == "Tighten Worklog queue filtering." for thought in thoughts))
 
     def test_proposed_approval_moves_to_approved_and_digests_sources(self) -> None:
         self._create_proposed_sprint_record()
@@ -360,10 +365,12 @@ class WorklogSprintQueueTests(unittest.TestCase):
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
+        self.assertIn("Restored", response.get_data(as_text=True))
         self.assertTrue(list((self.root / "06-sprints/rescinded").glob("*.md")))
         self.assertTrue(list((self.root / "05-sprint-handoffs/rescinded").glob("*.md")))
-        self.assertTrue((self.root / "04-inbox/thought-box/ims-ui.md").exists())
-        self.assertTrue((self.root / "04-inbox/thought-box/worklog-queue.md").exists())
+        thoughts = client.get("/api/assistant/thoughts").get_json()["thoughts"]
+        self.assertTrue(any(thought["raw_text_full"] == "Improve the IMS queue surface." for thought in thoughts))
+        self.assertTrue(any(thought["raw_text_full"] == "Tighten Worklog queue filtering." for thought in thoughts))
 
     def test_approved_delete_restores_ideas_and_moves_handoff(self) -> None:
         self._create_proposed_sprint_record()
@@ -377,10 +384,12 @@ class WorklogSprintQueueTests(unittest.TestCase):
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
+        self.assertIn("Restored", response.get_data(as_text=True))
         self.assertTrue(list((self.root / "06-sprints/deleted").glob("*.md")))
         self.assertTrue(list((self.root / "05-sprint-handoffs/deleted").glob("*.md")))
-        self.assertTrue((self.root / "04-inbox/thought-box/ims-ui.md").exists())
-        self.assertTrue((self.root / "04-inbox/thought-box/worklog-queue.md").exists())
+        thoughts = client.get("/api/assistant/thoughts").get_json()["thoughts"]
+        self.assertTrue(any(thought["raw_text_full"] == "Improve the IMS queue surface." for thought in thoughts))
+        self.assertTrue(any(thought["raw_text_full"] == "Tighten Worklog queue filtering." for thought in thoughts))
 
     def test_existing_active_ideas_are_not_duplicated(self) -> None:
         self._create_proposed_sprint_record()

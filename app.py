@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urljoin
 
-from flask import Flask, abort, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 import markdown
 
@@ -846,9 +846,50 @@ def _recreate_restored_thought(source_path: str, summary: str, sprint_code: str,
     return str(target.relative_to(WORKLOG_ROOT)), None
 
 
-def _restore_source_ideas_for_record(record: dict[str, object], restore_reason: str = "rescinded") -> tuple[list[str], list[str]]:
+def _normalize_restored_thought_file(path: Path, sprint_code: str, restore_reason: str, source_summary: str = "") -> None:
+    if not path.exists():
+        return
+    parsed = _parse_thought_file(path)
+    raw_text = str(parsed.get("raw_text_full") or source_summary or parsed.get("normalized_summary") or parsed.get("display_snippet") or parsed.get("title") or "").strip()
+    if not raw_text:
+        return
+    created_at = str(parsed.get("created_at") or datetime.now(timezone.utc).isoformat())
+    title = str(parsed.get("title") or path.stem.replace("-", " ").title())
+    ai_summary = str(parsed.get("ai_summary") or parsed.get("normalized_summary") or raw_text)
+    ai_inferred_app = str(parsed.get("ai_inferred_app") or "Worklog")
+    ai_inferred_type = str(parsed.get("ai_inferred_type") or "feature")
+    restored_at = datetime.now(timezone.utc).isoformat()
+    path.write_text(
+        "\n".join(
+            [
+                f"# {title}",
+                "",
+                f"- created_at: {created_at}",
+                "- source: David",
+                "- status: raw",
+                "- digest_status: not_digested",
+                f"- restored_from_sprint_code: {sprint_code or ''}",
+                f"- restored_at: {restored_at}",
+                f"- restore_reason: {restore_reason}",
+                f"- thought_fingerprint: {parsed.get('thought_id') or parsed.get('thought_fingerprint') or ''}",
+                f"- raw_text: {raw_text}",
+                f"- ai_inferred_app: {ai_inferred_app}",
+                f"- ai_inferred_type: {ai_inferred_type}",
+                f"- ai_summary: {ai_summary}",
+                "",
+                "## Raw Thought",
+                raw_text,
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def _restore_source_ideas_for_record(record: dict[str, object], restore_reason: str = "rescinded") -> tuple[list[str], list[str], dict[str, int]]:
     restored: list[str] = []
     warnings: list[str] = []
+    counts = {"restored": 0, "already_active": 0, "recreated": 0, "missing": 0}
     candidates = list(dict.fromkeys([
         *[str(item) for item in record.get("digested_source_thoughts", []) if str(item).strip()],
         *[str(item) for item in record.get("source_thought_paths", []) if str(item).strip()],
@@ -865,16 +906,31 @@ def _restore_source_ideas_for_record(record: dict[str, object], restore_reason: 
     ]
     sprint_code = str(record.get("sprint_code") or record.get("intended_sprint_code") or "")
     for index, source_path in enumerate(candidates):
+        source_file = WORKLOG_ROOT / source_path.strip()
+        already_active = source_file.exists() and source_file.parent == THOUGHT_BOX_DIR
         restored_path, warning = _restore_source_thought_path(source_path)
         if restored_path:
+            restored_file = WORKLOG_ROOT / restored_path
+            source_summary = summaries[min(index, len(summaries) - 1)] if summaries else ""
             restored.append(restored_path)
+            if already_active:
+                counts["already_active"] += 1
+            elif source_file.exists():
+                _normalize_restored_thought_file(restored_file, sprint_code, restore_reason, source_summary=source_summary)
+                counts["restored"] += 1
+            else:
+                _normalize_restored_thought_file(restored_file, sprint_code, restore_reason, source_summary=source_summary)
+                counts["recreated"] += 1
             continue
         source_summary = ""
         if summaries:
             source_summary = summaries[min(index, len(summaries) - 1)]
         recreated_path, recreate_warning = _recreate_restored_thought(source_path, source_summary, sprint_code, restore_reason)
         if recreated_path:
+            counts["recreated"] += 1
             restored.append(recreated_path)
+        else:
+            counts["missing"] += 1
         if recreate_warning:
             warnings.append(recreate_warning)
         elif warning:
@@ -888,10 +944,12 @@ def _restore_source_ideas_for_record(record: dict[str, object], restore_reason: 
                 restore_reason,
             )
             if recreated_path:
+                _normalize_restored_thought_file(WORKLOG_ROOT / recreated_path, sprint_code, restore_reason, source_summary=summary)
                 restored.append(recreated_path)
+                counts["recreated"] += 1
             if recreate_warning:
                 warnings.append(recreate_warning)
-    return restored, warnings
+    return restored, warnings, counts
 
 
 def _move_handoff_record(record: dict[str, object], status: str) -> str:
@@ -1727,11 +1785,12 @@ def _rescind_or_delete_sprint(record: dict[str, object], status: str, reason: st
     if status not in {"rescinded", "deleted"}:
         raise ValueError(f"Unsupported archive status: {status}")
 
-    restored_paths, warnings = _restore_source_ideas_for_record(record, restore_reason=status)
+    restored_paths, warnings, restore_counts = _restore_source_ideas_for_record(record, restore_reason=status)
     record = {**record}
     record["restored_source_thought_paths"] = restored_paths
     record["restored_source_ideas_count"] = len(restored_paths)
     record["missing_source_ideas_count"] = len(warnings)
+    record["restore_counts"] = restore_counts
     record["restore_warnings"] = warnings
     record["archive_reason"] = reason
     record["archived_by"] = performed_by or "system"
@@ -1751,6 +1810,7 @@ def _rescind_or_delete_sprint(record: dict[str, object], status: str, reason: st
             f"- archived_by: {record['archived_by']}",
             f"- restored_source_ideas_count: {record['restored_source_ideas_count']}",
             f"- missing_source_ideas_count: {record['missing_source_ideas_count']}",
+            f"- restore_counts: {json.dumps(restore_counts, sort_keys=True)}",
             f"- reason: {reason or 'none'}",
             *([f"- warning: {warning}" for warning in warnings] or []),
         ],
@@ -2959,6 +3019,30 @@ def sprint_action(sprint_id: str):
         performed_by = str(session.get(WORKLOG_SESSION_KEY, {}).get("username") or session.get(WORKLOG_SESSION_KEY, {}).get("email") or "system")
         reason = (request.form.get("reason") or "").strip()
         archived = _rescind_or_delete_sprint(record, "rescinded" if action == "rescind" else "deleted", reason=reason, performed_by=performed_by)
+        active_inventory_count_after = len(_thought_box_items(digested_only=False))
+        app.logger.info(
+            "sprint %s %s restored_count=%s already_active_count=%s recreated_count=%s missing_count=%s restored_paths=%s active_inventory_count_after=%s",
+            archived.get("sprint_code") or archived.get("id") or sprint_id,
+            action,
+            archived.get("restore_counts", {}).get("restored", 0),
+            archived.get("restore_counts", {}).get("already_active", 0),
+            archived.get("restore_counts", {}).get("recreated", 0),
+            archived.get("restore_counts", {}).get("missing", 0),
+            archived.get("restored_source_thought_paths", []),
+            active_inventory_count_after,
+        )
+        restored_count = int(archived.get("restore_counts", {}).get("restored", 0)) + int(archived.get("restore_counts", {}).get("already_active", 0)) + int(archived.get("restore_counts", {}).get("recreated", 0))
+        if restored_count:
+            flash(
+                f"Restored {restored_count} ideas to Idea Inventory.",
+                "success",
+            )
+        else:
+            warning_text = "No ideas were restored."
+            missing_count = int(archived.get("restore_counts", {}).get("missing", 0))
+            if missing_count:
+                warning_text = f"No ideas were restored. {missing_count} source ideas were missing or unavailable."
+            flash(warning_text, "warning")
         return redirect(url_for("sprints", status=archived["status_key"]))
     else:
         abort(400)
