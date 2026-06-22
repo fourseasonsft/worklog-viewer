@@ -1764,8 +1764,13 @@ def _mark_sprint_done(record: dict[str, object], performed_by: str = "ui") -> Pa
     text = re.sub(r"^- updated_at: .*?$", f"- updated_at: {done_at}", text, flags=re.M)
     target = _sprints_dir("done") / record_path.name
     target.parent.mkdir(parents=True, exist_ok=True)
-    record_path.rename(target)
-    target.write_text(text, encoding="utf-8")
+    if target.exists():
+        target.write_text(text, encoding="utf-8")
+        if record_path != target and record_path.exists():
+            record_path.unlink()
+    else:
+        record_path.rename(target)
+        target.write_text(text, encoding="utf-8")
     record["status_key"] = "done"
     record["status"] = "Done"
     record["path"] = str(target.relative_to(WORKLOG_ROOT))
@@ -2219,10 +2224,15 @@ def _sprint_record_by_id(sprint_id: str) -> dict[str, object] | None:
 
 def _sprint_record_by_code(sprint_code: str) -> dict[str, object] | None:
     sprint_code = sprint_code.strip().upper()
-    for record in _sprint_records():
-        if str(record.get("sprint_code") or "").strip().upper() == sprint_code:
-            return record
-    return None
+    records = [record for record in _sprint_records() if str(record.get("sprint_code") or "").strip().upper() == sprint_code]
+    if not records:
+        return None
+    preferred_statuses = ["proposed", "approved", "active", "completed", "staged", "shipped", "done", "reconciled", "rescinded", "deleted"]
+    for status in preferred_statuses:
+        for record in records:
+            if record.get("status_key") == status:
+                return record
+    return records[0]
 
 
 def _sprint_queue_dashboard_counts() -> dict[str, int]:

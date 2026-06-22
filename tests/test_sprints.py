@@ -125,6 +125,37 @@ class WorklogSprintQueueTests(unittest.TestCase):
         )
         return path
 
+    def _create_legacy_approved_record(self, sprint_code: str, filename: str, title: str, app_product: str = "Other") -> Path:
+        path = self.root / f"06-sprints/approved/{filename}"
+        path.write_text(
+            "\n".join(
+                [
+                    f"# Sprint Queue Record: {title}",
+                    "",
+                    f"- sprint_code: {sprint_code}",
+                    f"- app_product: {app_product}",
+                    "- status: approved",
+                    "- scope: Small",
+                    "- created_at: 2026-06-20T21:57:10Z",
+                    "",
+                    "## Source Ideas",
+                    "- Legacy idea.",
+                    "",
+                    "## Proposed Work",
+                    "- Legacy idea.",
+                    "",
+                    "## Handoff Markdown",
+                    "05-sprint-handoffs/legacy.md",
+                    "",
+                    "## Completion Requirement",
+                    f"When this sprint is complete, update Worklog using Sprint Code {sprint_code}.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return path
+
     def _create_proposed_sprint_record(self, title: str = "IMS Proposed", app_product: str = "IMS") -> Path:
         sprint_code = f"{viewer_app._sprint_code_prefix(app_product)}-SPRINT-20260620-001"
         (self.root / "04-inbox/thought-box/ims-ui.md").write_text(
@@ -202,11 +233,11 @@ class WorklogSprintQueueTests(unittest.TestCase):
 
     def test_mark_done_action_moves_record_to_done_queue(self) -> None:
         self._create_sprint_record("active", app_product="Worklog", title="Worklog Sprint")
-        record_id = viewer_app._sprint_records()[0]["id"]
+        record = viewer_app._sprint_records()[0]
         client = self._client()
         response = client.post(
-            f"/sprints/{record_id}/action",
-            data={"action": "done", "confirm": "mark this sprint done and move it to the done queue?"},
+            f"/sprints/code/{record['sprint_code']}/action",
+            data={"action": "done", "confirm": "yes"},
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
@@ -219,6 +250,49 @@ class WorklogSprintQueueTests(unittest.TestCase):
         done_html = client.get("/sprints?status=done").get_data(as_text=True)
         self.assertIn("Worklog Sprint", done_html)
         self.assertIn("Done", done_html)
+
+    def test_mark_done_legacy_record_overwrites_existing_done_target(self) -> None:
+        self._create_legacy_approved_record(
+            "OTHER-SPRINT-20260620-001",
+            "sp-20260620215733-other-reporting.md",
+            "Other reporting",
+        )
+        existing_done = self.root / "06-sprints/done/sp-20260620215733-other-reporting.md"
+        existing_done.write_text(
+            "# Sprint Queue Record: Other reporting\n\n- sprint_code: OTHER-SPRINT-20260620-001\n- status: done\n",
+            encoding="utf-8",
+        )
+        record_id = viewer_app._sprint_records()[0]["id"]
+        response = self._client().post(
+            "/sprints/code/OTHER-SPRINT-20260620-001/action",
+            data={"action": "done", "confirm": "yes"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        done_records = viewer_app._sprint_records()
+        done_record = next(record for record in done_records if record["sprint_code"] == "OTHER-SPRINT-20260620-001" and record["status_key"] == "done")
+        self.assertTrue(done_record["done_at"])
+        self.assertEqual((self.root / done_record["path"]).read_text(encoding="utf-8").count("## Reconciliation Pending"), 1)
+        self.assertFalse((self.root / "06-sprints/approved/sp-20260620215733-other-reporting.md").exists())
+
+    def test_mark_done_legacy_minimal_fields(self) -> None:
+        self._create_legacy_approved_record(
+            "OTHER-SPRINT-20260620-002",
+            "sp-20260620215733-other-follow-up.md",
+            "Other follow-up",
+        )
+        record_id = viewer_app._sprint_records()[0]["id"]
+        response = self._client().post(
+            "/sprints/code/OTHER-SPRINT-20260620-002/action",
+            data={"action": "done", "confirm": "yes"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        done_records = viewer_app._sprint_records()
+        done_record = next(record for record in done_records if record["sprint_code"] == "OTHER-SPRINT-20260620-002")
+        self.assertEqual(done_record["status_key"], "done")
+        self.assertTrue(done_record["done_at"])
+        self.assertIn("Reconciliation Pending", (self.root / done_record["path"]).read_text(encoding="utf-8"))
 
     def test_mark_done_does_not_appear_on_proposed_or_shipped(self) -> None:
         self._create_proposed_sprint_record()

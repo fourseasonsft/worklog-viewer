@@ -20,7 +20,7 @@
         <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('sprints') }}">Back to Sprint Queue</a>
         <a class="btn btn-outline-primary btn-sm" href="{{ url_for('dashboard') }}">Dashboard</a>
         {% if record.status_key == 'approved' %}
-          <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+          <form method="post" action="{{ url_for('sprint_action_by_code', sprint_code=record.sprint_code) }}">
             <input type="hidden" name="action" value="regenerate_handoff">
             <button class="btn btn-primary btn-sm" type="submit">Regenerate Handoff</button>
           </form>
@@ -79,9 +79,9 @@
             <a class="btn btn-outline-secondary" href="{{ url_for('sprints') }}">Back to Sprint Queue</a>
           {% else %}
             {% if record.status_key in ['active', 'completed', 'staged'] or (record.status_key == 'approved') %}
-              <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+              <form method="post" action="{{ url_for('sprint_action_by_code', sprint_code=record.sprint_code) }}">
                 <input type="hidden" name="action" value="done">
-                <input type="hidden" name="confirm" value="mark this sprint done and move it to the done queue?">
+                <input type="hidden" name="confirm" value="yes">
                 <button class="btn btn-dark" type="submit">Mark Done</button>
               </form>
             {% endif %}
