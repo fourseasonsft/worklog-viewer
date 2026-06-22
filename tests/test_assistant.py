@@ -114,6 +114,12 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertNotIn("Approved Sprint Queue", html)
         self.assertIn("Digest Selected", html)
         self.assertIn("select-all-ideas", html)
+        self.assertIn("Archive Selected", html)
+        self.assertIn("Edit Product", html)
+        self.assertIn("Mark Duplicate", html)
+        self.assertIn("Move", html)
+        self.assertIn("selected-count-badge", html)
+        self.assertNotIn('class="archive-button"', html)
         self.assertNotIn("Inventory Actions", html)
 
     def test_message_stores_raw_idea(self) -> None:

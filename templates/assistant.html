@@ -52,7 +52,12 @@
             <span class="badge text-bg-light border" id="selected-count-badge">0 selected</span>
             <button class="btn btn-primary btn-sm" type="button" id="digest-selected-button" disabled>Digest Selected</button>
             <button class="btn btn-outline-primary btn-sm" type="button" id="digest-all-button">Digest All</button>
+          </div>
+          <div class="d-flex flex-wrap align-items-center justify-content-lg-end gap-2">
             <button class="btn btn-outline-secondary btn-sm" type="button" id="archive-selected-button" disabled>Archive Selected</button>
+            <button class="btn btn-outline-secondary btn-sm" type="button" id="edit-product-button" disabled>Edit Product</button>
+            <button class="btn btn-outline-secondary btn-sm" type="button" id="mark-duplicate-button" disabled>Mark Duplicate</button>
+            <button class="btn btn-outline-secondary btn-sm" type="button" id="move-selected-button" disabled>Move</button>
             <button class="btn btn-outline-secondary btn-sm" type="button" id="clear-selection-button" disabled>Clear Selection</button>
           </div>
           <div id="selection-status" class="text-secondary small text-lg-end">Select one or more raw ideas to digest a focused inventory slice.</div>
@@ -69,7 +74,6 @@
               <th>Raw Thought</th>
               <th>Inferred App/Product</th>
               <th>Digest Status</th>
-              <th>Actions</th>
             </tr>
           </thead>
           <tbody id="idea-inventory-body">
@@ -92,17 +96,10 @@
                       {{ item.digest_status or 'not_digested' }}
                     </span>
                   </td>
-                  <td>
-                    <div class="d-flex flex-wrap gap-2">
-                      <a class="btn btn-outline-primary btn-sm" href="{{ url_for('view_file', relative_path=item.path) }}">View</a>
-                      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('thought_detail', relative_path=item.path) }}">Edit</a>
-                      <button class="btn btn-outline-secondary btn-sm archive-button" type="button" data-thought-path="{{ item.path }}">Archive</button>
-                    </div>
-                  </td>
                 </tr>
               {% endfor %}
             {% else %}
-              <tr><td colspan="6" class="text-secondary">No active raw ideas yet.</td></tr>
+              <tr><td colspan="5" class="text-secondary">No active raw ideas yet.</td></tr>
             {% endif %}
           </tbody>
         </table>
@@ -146,7 +143,6 @@
   const form = document.getElementById('assistant-form');
   const digestSelectedButton = document.getElementById('digest-selected-button');
   const digestAllButton = document.getElementById('digest-all-button');
-  const archiveSelectedButton = document.getElementById('archive-selected-button');
   const clearSelectionButton = document.getElementById('clear-selection-button');
   const selectAll = document.getElementById('select-all-ideas');
   const status = document.getElementById('assistant-status');
@@ -156,6 +152,10 @@
   const createSuggestedGroupsButton = document.getElementById('create-suggested-groups-button');
   const combineAllButton = document.getElementById('combine-all-button');
   const cancelGroupingButton = document.getElementById('cancel-grouping-button');
+  const archiveSelectedButton = document.getElementById('archive-selected-button');
+  const editProductButton = document.getElementById('edit-product-button');
+  const markDuplicateButton = document.getElementById('mark-duplicate-button');
+  const moveSelectedButton = document.getElementById('move-selected-button');
   const ideaInventoryBody = document.getElementById('idea-inventory-body');
   const selectedCountBadge = document.getElementById('selected-count-badge');
   const selectionStatus = document.getElementById('selection-status');
@@ -163,13 +163,14 @@
   const digestModalResult = document.getElementById('digest-modal-result');
   const digestModal = document.getElementById('digest-grouping-review-modal');
   let digestPreview = {{ digest_preview | tojson if digest_preview else 'null' }};
+  let selectedThoughtIds = new Set();
 
   function selectedCheckboxes() {
     return Array.from(document.querySelectorAll('.idea-select:checked'));
   }
 
   function selectedIds() {
-    return selectedCheckboxes().map((checkbox) => checkbox.value);
+    return selectedCheckboxes().map((checkbox) => checkbox.dataset.thoughtId || checkbox.value);
   }
 
   function selectedPaths() {
@@ -263,9 +264,13 @@
 
   function syncSelectionUI() {
     const count = selectedCheckboxes().length;
+    selectedThoughtIds = new Set(selectedIds());
     selectedCountBadge.textContent = `${count} selected`;
     digestSelectedButton.disabled = count === 0;
     archiveSelectedButton.disabled = count === 0;
+    editProductButton.disabled = count !== 1;
+    markDuplicateButton.disabled = count === 0;
+    moveSelectedButton.disabled = count === 0;
     clearSelectionButton.disabled = count === 0;
     const allCheckboxes = Array.from(document.querySelectorAll('.idea-select'));
     selectAll.checked = allCheckboxes.length > 0 && count === allCheckboxes.length;
@@ -278,6 +283,35 @@
     if (!checkbox) return;
     checkbox.checked = !checkbox.checked;
     syncSelectionUI();
+  }
+
+  function selectedThoughtPath() {
+    const selected = selectedCheckboxes()[0];
+    return selected?.dataset.thoughtPath || selected?.closest('tr')?.dataset.thoughtPath || selected?.value || '';
+  }
+
+  function openSelectedIdeaForEdit() {
+    if (selectedCheckboxes().length !== 1) {
+      status.textContent = 'Select exactly one idea to edit its inferred product.';
+      return;
+    }
+    const path = selectedThoughtPath();
+    if (path) {
+      window.location.href = `/assistant/thought/${path}`;
+    }
+  }
+
+  async function markSelectedDuplicate() {
+    const thought_paths = Array.from(document.querySelectorAll('.idea-select:checked')).map((checkbox) => checkbox.dataset.thoughtPath || checkbox.closest('tr')?.dataset.thoughtPath || checkbox.value);
+    if (!thought_paths.length) {
+      status.textContent = 'Select at least one raw idea before marking duplicates.';
+      return;
+    }
+    status.textContent = 'Marking selected ideas as duplicates...';
+    for (const thought_path of thought_paths) {
+      await archiveThought(thought_path);
+    }
+    status.textContent = 'Selected ideas marked as duplicates.';
   }
 
   function renderPreview(data) {
@@ -392,17 +426,23 @@
     const data = await res.json();
     ideaInventoryBody.innerHTML = '';
     if (!data.thoughts || !data.thoughts.length) {
-      ideaInventoryBody.innerHTML = '<tr><td colspan="6" class="text-secondary">No active raw ideas yet.</td></tr>';
+      ideaInventoryBody.innerHTML = '<tr><td colspan="5" class="text-secondary">No active raw ideas yet.</td></tr>';
+      syncSelectionUI();
       return;
     }
     data.thoughts.forEach((item) => {
       const row = document.createElement('tr');
       row.dataset.thoughtPath = item.path;
+      row.dataset.thoughtId = item.thought_id || '';
       row.addEventListener('click', (event) => {
         if (event.target.closest('a, button, input, label')) return;
         toggleIdeaRow(row);
       });
+      const checked = selectedThoughtIds.has(item.thought_id || '');
       row.innerHTML = `
+        <td>
+          <input class="form-check-input idea-select" type="checkbox" value="${item.thought_id || ''}" data-thought-id="${item.thought_id || ''}" data-thought-path="${item.path}" ${checked ? 'checked' : ''}>
+        </td>
         <td class="text-nowrap">${item.created_display || item.mtime_display || 'Unknown'}</td>
         <td>
           <div class="fw-semibold">${item.display_title || item.title || ''}</div>
@@ -410,16 +450,14 @@
         </td>
         <td><span class="badge text-bg-light border">${item.ai_inferred_app || 'Other'}</span></td>
         <td><span class="badge text-bg-warning">${item.digest_status || 'not_digested'}</span></td>
-        <td>
-          <div class="d-flex flex-wrap gap-2">
-            <a class="btn btn-outline-primary btn-sm" href="/view/${item.path}">View</a>
-            <button class="btn btn-outline-secondary btn-sm archive-button" type="button" data-thought-path="${item.path}">Archive</button>
-          </div>
-        </td>
       `;
       ideaInventoryBody.appendChild(row);
     });
+    document.querySelectorAll('.idea-select').forEach((checkbox) => {
+      checkbox.addEventListener('change', syncSelectionUI);
+    });
     bindArchiveButtons();
+    syncSelectionUI();
   }
 
   async function requestDigest(selectedOnly) {
@@ -541,6 +579,9 @@
     createSuggestedGroupsButton?.addEventListener('click', () => finalizeDigest('accept_suggested'));
     combineAllButton?.addEventListener('click', () => finalizeDigest('combine_all'));
     cancelGroupingButton?.addEventListener('click', () => finalizeDigest('cancel'));
+    editProductButton?.addEventListener('click', openSelectedIdeaForEdit);
+    markDuplicateButton?.addEventListener('click', markSelectedDuplicate);
+    moveSelectedButton?.addEventListener('click', openSelectedIdeaForEdit);
     archiveSelectedButton?.addEventListener('click', async () => {
       const thought_paths = Array.from(document.querySelectorAll('.idea-select:checked')).map((checkbox) => checkbox.dataset.thoughtPath || checkbox.closest('tr')?.dataset.thoughtPath || checkbox.value);
       if (!thought_paths.length) {
@@ -557,7 +598,6 @@
       }
       await refreshIdeas();
       status.textContent = 'Selected ideas archived.';
-      syncSelectionUI();
     });
   }
 
