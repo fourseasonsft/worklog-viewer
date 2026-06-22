@@ -181,7 +181,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("Reject", html)
 
     def test_proposed_detail_renders_sprint_style_layout(self) -> None:
-        path = self._create_proposed_sprint_record(title="Worklog Idea Inventory UI Cleanup", app_product="Worklog")
+        self._create_proposed_sprint_record(title="Worklog Idea Inventory UI Cleanup", app_product="Worklog")
         record = viewer_app._sprint_records()[0]
         html = self._client().get(f"/sprints/{record['id']}").get_data(as_text=True)
         self.assertIn("Summary", html)
@@ -195,7 +195,17 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("Back to Sprint Queue", html)
         self.assertIn("<details", html)
         self.assertIn("Debug metadata", html)
-        self.assertNotIn("proposal_id:", html.split("Debug metadata")[0])
+        self.assertIn("Handoff Preview", html.split("Debug metadata")[0])
+
+    def test_missing_handoff_shows_warning(self) -> None:
+        path = self._create_sprint_record("approved")
+        (self.root / "05-sprint-handoffs/2026-06-20-120000-ims-sprint.md").unlink()
+        text = path.read_text(encoding="utf-8").replace("- handoff_path: 05-sprint-handoffs/2026-06-20-120000-ims-sprint.md\n", "- handoff_path: \n")
+        text = text.replace("## Handoff Markdown\n05-sprint-handoffs/2026-06-20-120000-ims-sprint.md\n", "## Handoff Markdown\n\n")
+        path.write_text(text, encoding="utf-8")
+        html = self._client().get("/sprints/sp-20260620120000-approved").get_data(as_text=True)
+        self.assertIn("No handoff content found. Regenerate handoff.", html)
+        self.assertIn("Regenerate Handoff", html)
 
     def test_generated_sprint_code_is_unique(self) -> None:
         self._create_sprint_record("approved", app_product="IMS", title="IMS Sprint 1")
@@ -229,6 +239,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("Sprint Queue Record", html)
         self.assertIn("Sprint Code", html)
         self.assertIn("Handoff Preview", html)
+        self.assertIn("Sprint Handoff: IMS Sprint", html)
         self.assertIn("Copy Prompt", html)
         self.assertIn("Copy Handoff", html)
         self.assertIn("Mark Staged", html)
