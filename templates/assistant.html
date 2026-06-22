@@ -235,6 +235,10 @@
     return selectedCheckboxes().map((checkbox) => checkbox.value);
   }
 
+  function selectedPaths() {
+    return selectedCheckboxes().map((checkbox) => checkbox.dataset.thoughtPath || checkbox.closest('tr')?.dataset.thoughtPath || '');
+  }
+
   function clearDigestResult() {
     if (!digestResult) return;
     digestResult.className = 'alert d-none';
@@ -269,6 +273,13 @@
     selectAll.checked = allCheckboxes.length > 0 && count === allCheckboxes.length;
     selectAll.indeterminate = count > 0 && count < allCheckboxes.length;
     selectionStatus.textContent = count > 0 ? `${count} raw idea${count === 1 ? '' : 's'} selected.` : 'Select one or more raw ideas to digest a focused inventory slice.';
+  }
+
+  function toggleIdeaRow(row) {
+    const checkbox = row?.querySelector('.idea-select');
+    if (!checkbox) return;
+    checkbox.checked = !checkbox.checked;
+    syncSelectionUI();
   }
 
   function renderPreview(data) {
@@ -348,6 +359,10 @@
     data.thoughts.forEach((item) => {
       const row = document.createElement('tr');
       row.dataset.thoughtPath = item.path;
+      row.addEventListener('click', (event) => {
+        if (event.target.closest('a, button, input, label')) return;
+        toggleIdeaRow(row);
+      });
       row.innerHTML = `
         <td class="text-nowrap">${item.created_display || item.created_at || item.mtime_display || 'Unknown'}</td>
         <td>
@@ -370,12 +385,19 @@
 
   async function requestDigest(selectedOnly) {
     const selectedIdeaIds = selectedOnly ? selectedIds() : [];
+    const selectedSourcePaths = selectedOnly ? selectedPaths() : [];
     clearDigestResult();
     if (selectedOnly && selectedIdeaIds.length === 0) {
       showDigestResult('Select at least one raw idea before digesting.', 'warning');
       status.textContent = 'Select at least one raw idea before digesting.';
       return;
     }
+    console.debug('digest-preview selection', {
+      selected_idea_ids: selectedIdeaIds,
+      selected_idea_count: selectedIdeaIds.length,
+      selected_source_paths: selectedSourcePaths,
+      selected_only: selectedOnly,
+    });
     status.textContent = selectedOnly ? 'Building sprint groups from selected ideas...' : 'Building sprint groups...';
     const res = await fetch('{{ url_for("assistant_digest_preview") }}', {
       method: 'POST',
@@ -456,6 +478,12 @@
   function bindSelectionControls() {
     document.querySelectorAll('.idea-select').forEach((checkbox) => {
       checkbox.addEventListener('change', syncSelectionUI);
+    });
+    document.querySelectorAll('#idea-inventory-body tr').forEach((row) => {
+      row.addEventListener('click', (event) => {
+        if (event.target.closest('a, button, input, label')) return;
+        toggleIdeaRow(row);
+      });
     });
     selectAll?.addEventListener('change', () => {
       document.querySelectorAll('.idea-select').forEach((checkbox) => {

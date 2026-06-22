@@ -3014,6 +3014,13 @@ def assistant_digest_preview():
     skipped_selected_paths = [path for path in thought_paths if path not in active_by_path]
     if selected_only and not thoughts:
         return {"ok": False, "error": "Selected idea IDs no longer match active raw ideas."}, 400
+    app.logger.info(
+        "digest-preview selection ids=%s count=%s paths=%s selected_only=%s",
+        thought_ids,
+        len(thoughts),
+        thought_paths,
+        selected_only,
+    )
     preview = _preview_thought_items(thoughts)
     preview["review_mode"] = True
     preview["selection_mode"] = "selected" if selected_only and (thought_ids or thought_paths) else "all"

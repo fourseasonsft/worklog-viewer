@@ -98,6 +98,7 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("Idea Inventory digest to sprint groups", html)
         self.assertIn("Active Idea Inventory", html)
         self.assertIn("digest-grouping-review-modal", html)
+        self.assertIn("data-thought-path", html)
         self.assertNotIn("Digest by App/Product", html)
         self.assertNotIn("Proposed Sprint Groups", html)
         self.assertNotIn("Approved Sprint Queue", html)
@@ -170,10 +171,31 @@ class WorklogAssistantTests(unittest.TestCase):
             },
         ).get_json()["digest_preview"]
         self.assertEqual(preview["selection_mode"], "selected")
-        selected_item = next(item for item in viewer_app._thought_box_items(digested_only=False) if item["path"].endswith("100001-worklog.md"))
+        selected_item = next(item for item in viewer_app._thought_box_items(digested_only=False) if item["thought_id"] == preview["selected_thought_ids"][0])
         self.assertEqual(preview["selected_thought_ids"], [selected_item["thought_id"]])
+        self.assertEqual(preview["selected_idea_ids"], [selected_item["thought_id"]])
         self.assertEqual(preview["source_thought_paths"], [selected_item["path"]])
         self.assertEqual(len(preview["active_items"]), 1)
+
+    def test_digest_preview_returns_selected_payload_fields(self) -> None:
+        self._write_thought(
+            "2026-06-20-100000-ims.md",
+            "# IMS\n\n- created_at: 2026-06-20T10:00:00Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: IMS needs queue selection.\n- ai_inferred_app: IMS\n- ai_inferred_type: feature\n- ai_summary: IMS needs queue selection.\n",
+        )
+        self._write_thought(
+            "2026-06-20-100001-worklog.md",
+            "# Worklog\n\n- created_at: 2026-06-20T10:00:01Z\n- source: David\n- status: raw\n- digest_status: not_digested\n- raw_text: Worklog needs queue selection.\n- ai_inferred_app: Worklog\n- ai_inferred_type: feature\n- ai_summary: Worklog needs queue selection.\n",
+        )
+        preview = self._client().post(
+            "/api/assistant/digest-preview",
+            json={
+                "selected_idea_ids": [item["thought_id"] for item in viewer_app._thought_box_items(digested_only=False)],
+                "selected_only": True,
+            },
+        ).get_json()["digest_preview"]
+        self.assertEqual(preview["selected_idea_count"], 2)
+        self.assertEqual(len(preview["selected_thought_ids"]), 2)
+        self.assertEqual(len(preview["source_thought_paths"]), 2)
 
     def test_digest_all_includes_all_active_ideas(self) -> None:
         self._write_thought(
