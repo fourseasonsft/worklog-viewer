@@ -164,6 +164,9 @@ class WorklogSprintQueueTests(unittest.TestCase):
         )
         return path
 
+    def _create_worklog_proposed_record(self, title: str = "Worklog Proposed") -> Path:
+        return self._create_proposed_sprint_record(title=title, app_product="Worklog")
+
     def test_sprint_queue_page_renders(self) -> None:
         self._create_sprint_record("approved")
         html = self._client().get("/sprints").get_data(as_text=True)
@@ -233,6 +236,20 @@ class WorklogSprintQueueTests(unittest.TestCase):
         combo_html = client.get("/sprints?status=approved&app=ims").get_data(as_text=True)
         self.assertIn("IMS Sprint", combo_html)
 
+    def test_queue_excludes_rescinded_and_deleted_by_default(self) -> None:
+        self._create_sprint_record("approved", title="Queue Archive Candidate", app_product="IMS")
+        client = self._client()
+        record = viewer_app._sprint_records()[0]
+        client.post(f"/sprints/{record['id']}/action", data={"action": "rescind", "confirm": "rescind this sprint and return its ideas to inventory?"}, follow_redirects=True)
+        rescinded_html = client.get("/sprints?status=rescinded").get_data(as_text=True)
+        self.assertIn("Queue Archive Candidate", rescinded_html)
+        archived = viewer_app._sprint_records()[0]
+        client.post(f"/sprints/{archived['id']}/action", data={"action": "delete", "confirm": "delete this sprint record and return its ideas to inventory?"}, follow_redirects=True)
+        html = client.get("/sprints").get_data(as_text=True)
+        self.assertNotIn("Queue Archive Candidate", html)
+        deleted_html = client.get("/sprints?status=deleted").get_data(as_text=True)
+        self.assertIn("Queue Archive Candidate", deleted_html)
+
     def test_detail_page_renders(self) -> None:
         self._create_sprint_record("completed")
         html = self._client().get("/sprints/sp-20260620120000-completed").get_data(as_text=True)
@@ -266,6 +283,26 @@ class WorklogSprintQueueTests(unittest.TestCase):
         shipped_path = self.root / "06-sprints/shipped/sp-20260620120000-approved-ims-sprint.md"
         self.assertTrue(shipped_path.exists())
 
+    def test_proposed_rescind_restores_ideas(self) -> None:
+        self._create_proposed_sprint_record()
+        client = self._client()
+        record = viewer_app._sprint_records()[0]
+        response = client.post(f"/sprints/{record['id']}/action", data={"action": "rescind", "confirm": "rescind this sprint and return its ideas to inventory?"}, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(list((self.root / "06-sprints/rescinded").glob("*.md")))
+        self.assertTrue((self.root / "04-inbox/thought-box/ims-ui.md").exists())
+        self.assertTrue((self.root / "04-inbox/thought-box/worklog-queue.md").exists())
+
+    def test_proposed_delete_restores_ideas(self) -> None:
+        self._create_proposed_sprint_record()
+        client = self._client()
+        record = viewer_app._sprint_records()[0]
+        response = client.post(f"/sprints/{record['id']}/action", data={"action": "delete", "confirm": "delete this sprint record and return its ideas to inventory?"}, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(list((self.root / "06-sprints/deleted").glob("*.md")))
+        self.assertTrue((self.root / "04-inbox/thought-box/ims-ui.md").exists())
+        self.assertTrue((self.root / "04-inbox/thought-box/worklog-queue.md").exists())
+
     def test_proposed_approval_moves_to_approved_and_digests_sources(self) -> None:
         self._create_proposed_sprint_record()
         client = self._client()
@@ -284,6 +321,85 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertTrue(list((self.root / "06-sprints/rejected").glob("*.md")))
         self.assertFalse(list((self.root / "04-inbox/thought-box/digested").glob("*.md")))
         self.assertTrue((self.root / "06-sprints/proposed").exists())
+
+    def test_approved_rescind_restores_ideas_and_moves_handoff(self) -> None:
+        self._create_proposed_sprint_record()
+        client = self._client()
+        record_id = viewer_app._sprint_records()[0]["id"]
+        client.post(f"/sprints/{record_id}/action", data={"action": "approve"}, follow_redirects=True)
+        approved = viewer_app._sprint_records()[0]
+        response = client.post(
+            f"/sprints/{approved['id']}/action",
+            data={"action": "rescind", "confirm": "rescind this sprint and return its ideas to inventory?"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(list((self.root / "06-sprints/rescinded").glob("*.md")))
+        self.assertTrue(list((self.root / "05-sprint-handoffs/rescinded").glob("*.md")))
+        self.assertTrue((self.root / "04-inbox/thought-box/ims-ui.md").exists())
+        self.assertTrue((self.root / "04-inbox/thought-box/worklog-queue.md").exists())
+
+    def test_approved_delete_restores_ideas_and_moves_handoff(self) -> None:
+        self._create_proposed_sprint_record()
+        client = self._client()
+        record_id = viewer_app._sprint_records()[0]["id"]
+        client.post(f"/sprints/{record_id}/action", data={"action": "approve"}, follow_redirects=True)
+        approved = viewer_app._sprint_records()[0]
+        response = client.post(
+            f"/sprints/{approved['id']}/action",
+            data={"action": "delete", "confirm": "delete this sprint record and return its ideas to inventory?"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(list((self.root / "06-sprints/deleted").glob("*.md")))
+        self.assertTrue(list((self.root / "05-sprint-handoffs/deleted").glob("*.md")))
+        self.assertTrue((self.root / "04-inbox/thought-box/ims-ui.md").exists())
+        self.assertTrue((self.root / "04-inbox/thought-box/worklog-queue.md").exists())
+
+    def test_existing_active_ideas_are_not_duplicated(self) -> None:
+        self._create_proposed_sprint_record()
+        client = self._client()
+        record_id = viewer_app._sprint_records()[0]["id"]
+        client.post(f"/sprints/{record_id}/action", data={"action": "approve"}, follow_redirects=True)
+        active_file = self.root / "04-inbox/thought-box/ims-ui.md"
+        active_file.write_text("already active", encoding="utf-8")
+        approved = viewer_app._sprint_records()[0]
+        client.post(
+            f"/sprints/{approved['id']}/action",
+            data={"action": "rescind", "confirm": "rescind this sprint and return its ideas to inventory?"},
+            follow_redirects=True,
+        )
+        restored_files = sorted((self.root / "04-inbox/thought-box").glob("ims-ui*.md"))
+        self.assertEqual(active_file.read_text(encoding="utf-8"), "already active")
+        self.assertTrue(restored_files)
+
+    def test_missing_source_ideas_warn_but_do_not_crash(self) -> None:
+        self._create_proposed_sprint_record()
+        client = self._client()
+        record_id = viewer_app._sprint_records()[0]["id"]
+        client.post(f"/sprints/{record_id}/action", data={"action": "approve"}, follow_redirects=True)
+        approved = viewer_app._sprint_records()[0]
+        digested = self.root / "04-inbox/thought-box/digested"
+        for path in digested.glob("*.md"):
+            path.unlink()
+        approved_path = self.root / "06-sprints/approved" / Path(approved["path"]).name
+        text = approved_path.read_text(encoding="utf-8")
+        text = text.replace("## Source Thought Paths\n- 04-inbox/thought-box/ims-ui.md\n- 04-inbox/thought-box/worklog-queue.md\n", "## Source Thought Paths\n- 04-inbox/thought-box/missing-a.md\n- 04-inbox/thought-box/missing-b.md\n")
+        approved_path.write_text(text, encoding="utf-8")
+        response = client.post(
+            f"/sprints/{approved['id']}/action",
+            data={"action": "rescind", "confirm": "rescind this sprint and return its ideas to inventory?"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        rescinded_path = next((self.root / "06-sprints/rescinded").glob("*.md"))
+        content = rescinded_path.read_text(encoding="utf-8")
+        self.assertIn("missing_source_ideas_count", content)
+
+    def test_confirmation_routes_require_post(self) -> None:
+        self._create_sprint_record("approved")
+        response = self._client().get("/sprints/sp-20260620120000-approved/action")
+        self.assertEqual(response.status_code, 405)
 
     def test_completion_update_by_code_works(self) -> None:
         self._create_sprint_record("approved")

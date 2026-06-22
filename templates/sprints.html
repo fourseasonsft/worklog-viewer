@@ -86,25 +86,86 @@
                         <input type="hidden" name="action" value="reject">
                         <button class="btn btn-outline-secondary btn-sm" type="submit">Reject</button>
                       </form>
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="rescind">
+                        <input type="hidden" name="confirm" value="rescind this sprint and return its ideas to inventory?">
+                        <button class="btn btn-outline-warning btn-sm" type="submit">Rescind</button>
+                      </form>
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="confirm" value="delete this sprint record and return its ideas to inventory?">
+                        <button class="btn btn-outline-danger btn-sm" type="submit">Delete</button>
+                      </form>
                     {% elif record.status_key == 'approved' %}
                       <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
                         <input type="hidden" name="action" value="start">
                         <button class="btn btn-outline-secondary btn-sm" type="submit">Start Sprint</button>
+                      </form>
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="rescind">
+                        <input type="hidden" name="confirm" value="rescind this sprint and return its ideas to inventory?">
+                        <button class="btn btn-outline-warning btn-sm" type="submit">Rescind</button>
+                      </form>
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="confirm" value="delete this sprint record and return its ideas to inventory?">
+                        <button class="btn btn-outline-danger btn-sm" type="submit">Delete</button>
                       </form>
                     {% elif record.status_key == 'active' %}
                       <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
                         <input type="hidden" name="action" value="complete">
                         <button class="btn btn-outline-secondary btn-sm" type="submit">Complete Sprint</button>
                       </form>
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="rescind">
+                        <input type="hidden" name="confirm" value="rescind this sprint and return its ideas to inventory?">
+                        <button class="btn btn-outline-warning btn-sm" type="submit">Rescind</button>
+                      </form>
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="confirm" value="delete this sprint record and return its ideas to inventory?">
+                        <button class="btn btn-outline-danger btn-sm" type="submit">Delete</button>
+                      </form>
                     {% elif record.status_key == 'completed' %}
                       <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
                         <input type="hidden" name="action" value="stage">
                         <button class="btn btn-outline-secondary btn-sm" type="submit">Mark Staged</button>
                       </form>
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="rescind">
+                        <input type="hidden" name="confirm" value="rescind this sprint and return its ideas to inventory?">
+                        <button class="btn btn-outline-warning btn-sm" type="submit">Rescind</button>
+                      </form>
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="confirm" value="delete this sprint record and return its ideas to inventory?">
+                        <button class="btn btn-outline-danger btn-sm" type="submit">Delete</button>
+                      </form>
                     {% elif record.status_key == 'staged' %}
                       <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
                         <input type="hidden" name="action" value="ship">
                         <button class="btn btn-outline-secondary btn-sm" type="submit">Mark Shipped</button>
+                      </form>
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="rescind">
+                        <input type="hidden" name="confirm" value="rescind this sprint and return its ideas to inventory?">
+                        <button class="btn btn-outline-warning btn-sm" type="submit">Rescind</button>
+                      </form>
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="confirm" value="delete this sprint record and return its ideas to inventory?">
+                        <button class="btn btn-outline-danger btn-sm" type="submit">Delete</button>
+                      </form>
+                    {% elif record.status_key == 'shipped' %}
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="rescind">
+                        <input type="hidden" name="confirm" value="rescind this sprint and return its ideas to inventory?">
+                        <button class="btn btn-outline-warning btn-sm" type="submit">Rescind</button>
+                      </form>
+                      <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="confirm" value="delete this sprint record and return its ideas to inventory?">
+                        <button class="btn btn-outline-danger btn-sm" type="submit">Delete</button>
                       </form>
                     {% endif %}
                   </div>

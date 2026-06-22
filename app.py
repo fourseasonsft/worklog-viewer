@@ -702,8 +702,13 @@ def _sprints_dir(status: str | None = None) -> Path:
 
 
 def _ensure_sprint_dirs() -> None:
-    for status in ["proposed", "rejected", "approved", "active", "completed", "staged", "shipped"]:
+    for status in ["proposed", "rejected", "rescinded", "deleted", "approved", "active", "completed", "staged", "shipped"]:
         _sprints_dir(status).mkdir(parents=True, exist_ok=True)
+
+
+def _ensure_handoff_dirs() -> None:
+    for status in ["rescinded", "deleted"]:
+        (_sprint_handoffs_dir() / status).mkdir(parents=True, exist_ok=True)
 
 
 def _proposal_record_path(proposal_id: str, title: str) -> Path:
@@ -761,6 +766,89 @@ def _write_proposed_sprint_record(group: dict[str, object]) -> Path:
     )
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def _restore_source_thought_path(source_path: str) -> tuple[str | None, str | None]:
+    source_path = source_path.strip()
+    if not source_path:
+        return None, "missing source path"
+    source_file = WORKLOG_ROOT / source_path
+    if source_file.name:
+        candidate_name = source_file.name
+    else:
+        candidate_name = Path(source_path).name
+    active_target = THOUGHT_BOX_DIR / candidate_name
+    if source_file.exists():
+        if source_file.parent == THOUGHT_BOX_DIR:
+            return str(source_file.relative_to(WORKLOG_ROOT)), None
+        target = active_target
+        if target.exists():
+            stem = target.stem
+            suffix = target.suffix
+            for index in range(2, 1000):
+                candidate = THOUGHT_BOX_DIR / f"{stem}-restored-{index:03d}{suffix}"
+                if not candidate.exists():
+                    target = candidate
+                    break
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source_file.rename(target)
+        return str(target.relative_to(WORKLOG_ROOT)), None
+    if active_target.exists():
+        return str(active_target.relative_to(WORKLOG_ROOT)), None
+    return None, f"missing source idea: {source_path}"
+
+
+def _restore_source_ideas_for_record(record: dict[str, object]) -> tuple[list[str], list[str]]:
+    restored: list[str] = []
+    warnings: list[str] = []
+    candidates = list(dict.fromkeys([
+        *[str(item) for item in record.get("digested_source_thoughts", []) if str(item).strip()],
+        *[str(item) for item in record.get("source_thought_paths", []) if str(item).strip()],
+        *[str(item) for item in record.get("source_thoughts", []) if str(item).strip()],
+    ]))
+    for source_path in candidates:
+        restored_path, warning = _restore_source_thought_path(source_path)
+        if restored_path:
+            restored.append(restored_path)
+        if warning:
+            warnings.append(warning)
+    return restored, warnings
+
+
+def _move_handoff_record(record: dict[str, object], status: str) -> str:
+    handoff_path = str(record.get("handoff_path") or "").strip()
+    if not handoff_path:
+        return ""
+    source = WORKLOG_ROOT / handoff_path
+    if not source.exists():
+        return handoff_path
+    _ensure_handoff_dirs()
+    target_dir = _sprint_handoffs_dir() / status
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / source.name
+    if target.exists():
+        target = target_dir / f"{source.stem}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}{source.suffix}"
+    source.rename(target)
+    return str(target.relative_to(WORKLOG_ROOT))
+
+
+def _archive_sprint_record(record: dict[str, object], status: str) -> Path | None:
+    source = WORKLOG_ROOT / str(record["path"])
+    if not source.exists():
+        return None
+    target = _sprints_dir(status) / source.name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    source.rename(target)
+    return target
+
+
+def _append_sprint_audit_note(path: Path, note_lines: list[str]) -> None:
+    text = path.read_text(encoding="utf-8")
+    if "## Audit Trail" not in text:
+        text += "\n## Audit Trail\n"
+    text += "\n" + "\n".join(note_lines).strip() + "\n"
+    text = re.sub(r"^- updated_at: .*?$", f"- updated_at: {datetime.now(timezone.utc).isoformat()}", text, flags=re.M)
+    path.write_text(text, encoding="utf-8")
 
 
 def _parse_proposed_sprint_record(path: Path) -> dict[str, object]:
@@ -1454,7 +1542,7 @@ def _assistant_update_shipments() -> list[dict[str, str]]:
 def _sprint_records() -> list[dict[str, object]]:
     _ensure_sprint_dirs()
     records = []
-    for status in ["proposed", "approved", "active", "completed", "staged", "shipped"]:
+    for status in ["proposed", "rescinded", "deleted", "approved", "active", "completed", "staged", "shipped"]:
         for path in sorted(_sprints_dir(status).glob("*.md"), reverse=True):
             record = _parse_sprint_record(path)
             record["status_key"] = status
@@ -1468,7 +1556,7 @@ def _filter_sprint_records(records: list[dict[str, object]], status: str, app_sl
     status = (status or "all").lower()
     app_slug = _normalize_app_filter(app_slug)
     if status == "all":
-        filtered = records
+        filtered = [record for record in records if record.get("status_key") not in {"rescinded", "deleted"}]
     else:
         filtered = [record for record in records if record.get("status_key") == status]
     if app_slug != "all":
@@ -1546,6 +1634,53 @@ def _sprint_queue_dashboard_counts() -> dict[str, int]:
         "staged": sum(1 for record in records if record.get("status_key") == "staged"),
         "shipped": sum(1 for record in records if record.get("status_key") == "shipped"),
     }
+
+
+def _rescind_or_delete_sprint(record: dict[str, object], status: str, reason: str = "", performed_by: str = "") -> dict[str, object]:
+    status = status.lower()
+    if status not in {"rescinded", "deleted"}:
+        raise ValueError(f"Unsupported archive status: {status}")
+
+    restored_paths, warnings = _restore_source_ideas_for_record(record)
+    record = {**record}
+    record["restored_source_thought_paths"] = restored_paths
+    record["restored_source_ideas_count"] = len(restored_paths)
+    record["missing_source_ideas_count"] = len(warnings)
+    record["restore_warnings"] = warnings
+    record["archive_reason"] = reason
+    record["archived_by"] = performed_by or "system"
+    record["archived_at"] = datetime.now(timezone.utc).isoformat()
+    if status == "rescinded":
+        record["rescinded_at"] = record["archived_at"]
+    else:
+        record["deleted_at"] = record["archived_at"]
+
+    source_path = WORKLOG_ROOT / str(record["path"])
+    _append_sprint_audit_note(
+        source_path,
+        [
+            "## Archive Note",
+            f"- action: {status}",
+            f"- archived_at: {record['archived_at']}",
+            f"- archived_by: {record['archived_by']}",
+            f"- restored_source_ideas_count: {record['restored_source_ideas_count']}",
+            f"- missing_source_ideas_count: {record['missing_source_ideas_count']}",
+            f"- reason: {reason or 'none'}",
+            *([f"- warning: {warning}" for warning in warnings] or []),
+        ],
+    )
+    new_path = _archive_sprint_record(record, status)
+    if not new_path:
+        return record
+    record["path"] = str(new_path.relative_to(WORKLOG_ROOT))
+    record["status_key"] = status
+    record["status"] = status.title()
+
+    if record.get("handoff_path"):
+        moved_handoff = _move_handoff_record(record, status)
+        if moved_handoff:
+            record["handoff_path"] = moved_handoff
+    return record
 
 
 def _write_update_shipment_record(preview: dict[str, object], created_items: list[str], moved_paths: list[str]) -> Path:
@@ -2549,7 +2684,7 @@ def assistant():
 @_require_worklog_session
 def sprints():
     status = (request.args.get("status") or "all").strip().lower()
-    if status not in {"all", "proposed", "approved", "active", "completed", "staged", "shipped"}:
+    if status not in {"all", "proposed", "rescinded", "deleted", "approved", "active", "completed", "staged", "shipped"}:
         status = "all"
     app_slug = _normalize_app_filter(request.args.get("app"))
     records = _filter_sprint_records(_sprint_records(), status, app_slug)
@@ -2562,6 +2697,8 @@ def sprints():
         status_options=[
             {"value": "all", "label": "All"},
             {"value": "proposed", "label": "Proposed"},
+            {"value": "rescinded", "label": "Rescinded"},
+            {"value": "deleted", "label": "Deleted"},
             {"value": "approved", "label": "Approved"},
             {"value": "active", "label": "Active"},
             {"value": "completed", "label": "Completed"},
@@ -2626,6 +2763,15 @@ def sprint_action(sprint_id: str):
             abort(400)
         _reject_proposed_sprint_record(record)
         return redirect(url_for("sprints", status="proposed"))
+    elif action in {"rescind", "delete"}:
+        confirm = (request.form.get("confirm") or "").strip().lower()
+        expected = "rescind this sprint and return its ideas to inventory?" if action == "rescind" else "delete this sprint record and return its ideas to inventory?"
+        if confirm != expected:
+            return {"ok": False, "error": "Confirmation text did not match."}, 400
+        performed_by = str(session.get(WORKLOG_SESSION_KEY, {}).get("username") or session.get(WORKLOG_SESSION_KEY, {}).get("email") or "system")
+        reason = (request.form.get("reason") or "").strip()
+        archived = _rescind_or_delete_sprint(record, "rescinded" if action == "rescind" else "deleted", reason=reason, performed_by=performed_by)
+        return redirect(url_for("sprints", status=archived["status_key"]))
     else:
         abort(400)
     return redirect(url_for("sprint_detail", sprint_id=sprint_id))
