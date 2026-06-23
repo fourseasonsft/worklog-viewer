@@ -5,22 +5,22 @@
       <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
         <div>
           <div class="text-uppercase text-secondary small fw-semibold mb-1">FSFT Worklog</div>
-          <h1 class="h2 mb-2">Structured Intake</h1>
-          <div class="text-secondary">Use this for deliberate manual entry. For raw ideas, go to Idea Inventory.</div>
+          <h1 class="h2 mb-2">User Requests</h1>
+          <div class="text-secondary">Use this for deliberate manual intake. Convert requests into Idea Inventory when they are ready to be digested.</div>
         </div>
         <div class="d-flex flex-wrap gap-2">
           <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('dashboard') }}">Back to dashboard</a>
           <a class="btn btn-outline-primary btn-sm" href="{{ url_for('assistant') }}">Open Idea Inventory</a>
-          <a class="btn btn-outline-primary btn-sm" href="{{ url_for('intake', plain=0 if plain_mode else 1) }}">{{ 'Technical view' if plain_mode else 'Plain-English mode' }}</a>
+          <a class="btn btn-outline-primary btn-sm" href="{{ url_for('intake') }}">{{ 'Technical view' if plain_mode else 'List view' }}</a>
         </div>
       </div>
     </div>
   </div>
 
   <div class="row g-3 mb-4">
-    <div class="col-12 col-md-6 col-xxl-3"><div class="card surface-card card-shadow border-0 h-100"><div class="card-body"><div class="text-secondary small text-uppercase fw-semibold">Inbox Total</div><div class="display-6 fw-semibold">{{ intake_counts.total }}</div></div></div></div>
-    <div class="col-12 col-md-6 col-xxl-3"><div class="card surface-card card-shadow border-0 h-100"><div class="card-body"><div class="text-secondary small text-uppercase fw-semibold">Urgent / High</div><div class="display-6 fw-semibold">{{ intake_counts.urgent_high }}</div></div></div></div>
-    <div class="col-12 col-md-6 col-xxl-3"><div class="card surface-card card-shadow border-0 h-100"><div class="card-body"><div class="text-secondary small text-uppercase fw-semibold">Blockers</div><div class="display-6 fw-semibold">{{ intake_counts.blockers }}</div></div></div></div>
+    <div class="col-12 col-md-6 col-xxl-3"><div class="card surface-card card-shadow border-0 h-100"><div class="card-body"><div class="text-secondary small text-uppercase fw-semibold">User Requests</div><div class="display-6 fw-semibold">{{ intake_items|length }}</div></div></div></div>
+    <div class="col-12 col-md-6 col-xxl-3"><div class="card surface-card card-shadow border-0 h-100"><div class="card-body"><div class="text-secondary small text-uppercase fw-semibold">Ready to Convert</div><div class="display-6 fw-semibold">{{ intake_items|selectattr('request_status', 'equalto', 'New')|list|length }}</div></div></div></div>
+    <div class="col-12 col-md-6 col-xxl-3"><div class="card surface-card card-shadow border-0 h-100"><div class="card-body"><div class="text-secondary small text-uppercase fw-semibold">Converted</div><div class="display-6 fw-semibold">{{ intake_items|selectattr('request_status', 'equalto', 'Converted')|list|length }}</div></div></div></div>
     <div class="col-12 col-md-6 col-xxl-3"><div class="card surface-card card-shadow border-0 h-100"><div class="card-body"><div class="text-secondary small text-uppercase fw-semibold">Recent Items</div><div class="display-6 fw-semibold">{{ intake_items|length }}</div></div></div></div>
   </div>
 
@@ -28,78 +28,98 @@
     <div class="card-body p-4 p-xl-5">
       <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-end mb-3">
         <div>
-          <div class="text-uppercase text-secondary small fw-semibold mb-2">Structured Intake</div>
-          <h2 class="h4 mb-1">Create structured work item</h2>
-          <div class="text-secondary">This is for tracked work, not raw thought capture.</div>
+          <div class="text-uppercase text-secondary small fw-semibold mb-2">Create User Request</div>
+          <h2 class="h4 mb-1">Capture a request before it becomes an idea</h2>
+          <div class="text-secondary">This is for tracked requests that may later convert into Idea Inventory.</div>
         </div>
       </div>
       <form method="post" action="{{ url_for('intake') }}">
-        <input type="hidden" name="plain_mode" value="{{ '1' if plain_mode else '0' }}">
+        <input type="hidden" name="action" value="create">
         <div class="row g-3">
-          <div class="col-12"><label class="form-label">Title</label><input class="form-control" name="title" required></div>
-          <div class="col-12 col-lg-4"><label class="form-label">Type</label>
-            <select class="form-select" name="type">
-              <option value="bug">Bug</option>
-              <option value="feature">Feature</option>
-              <option value="support">Support</option>
-              <option value="note" selected>Note</option>
-              <option value="blocker">Blocker</option>
-              <option value="thought">Thought</option>
-              <option value="customer-request">Customer Request</option>
+          <div class="col-12 col-lg-6"><label class="form-label">Request Title</label><input class="form-control" name="request_title" required></div>
+          <div class="col-12 col-lg-6"><label class="form-label">App / Product</label><input class="form-control" name="app_project" value="worklog"></div>
+          <div class="col-12"><label class="form-label">Request Details</label><textarea class="form-control" name="request_details" rows="4"></textarea></div>
+          <div class="col-12 col-lg-4"><label class="form-label">Requester Name</label><input class="form-control" name="requester_name" value="David"></div>
+          <div class="col-12 col-lg-4"><label class="form-label">Requester Email</label><input class="form-control" name="requester_email" type="email"></div>
+          <div class="col-12 col-lg-4"><label class="form-label">Organization</label><input class="form-control" name="organization"></div>
+          <div class="col-12 col-lg-4"><label class="form-label">Source Type</label>
+            <select class="form-select" name="source_type">
+              {% for value in request_source_types %}
+                <option value="{{ value }}">{{ value }}</option>
+              {% endfor %}
             </select>
           </div>
-          <div class="col-12 col-lg-4"><label class="form-label">App / Project</label><input class="form-control" name="app_project" value="worklog"></div>
-          <div class="col-12 col-lg-4"><label class="form-label">Priority</label>
-            <select class="form-select" name="priority">
-              <option value="urgent">urgent</option>
-              <option value="high" selected>high</option>
-              <option value="medium">medium</option>
-              <option value="low">low</option>
+          <div class="col-12 col-lg-4"><label class="form-label">Request Status</label>
+            <select class="form-select" name="request_status" disabled>
+              {% for value in request_status_options %}
+                <option value="{{ value }}" {% if value == 'New' %}selected{% endif %}>{{ value }}</option>
+              {% endfor %}
             </select>
+            <div class="form-text">New requests are created in the New state.</div>
           </div>
-          <div class="col-12 col-lg-4"><label class="form-label">Requested By</label><input class="form-control" name="requested_by" value="David"></div>
-          <div class="col-12 col-lg-4"><label class="form-label">Source</label><input class="form-control" name="source" value="Worklog Viewer"></div>
-          <div class="col-12 col-lg-4"><label class="form-label">Next Action</label><input class="form-control" name="next_action"></div>
-          <div class="col-12"><label class="form-label">Plain English Summary</label><textarea class="form-control" name="plain_english_summary" rows="3"></textarea></div>
-          <div class="col-12"><label class="form-label">Technical Notes</label><textarea class="form-control" name="technical_notes" rows="4"></textarea></div>
         </div>
         <div class="mt-3 d-flex gap-2">
-          <button class="btn btn-primary" type="submit">Create item</button>
+          <button class="btn btn-primary" type="submit">Create User Request</button>
           <a class="btn btn-outline-secondary" href="{{ url_for('dashboard') }}">Cancel</a>
         </div>
       </form>
     </div>
   </div>
 
-  <div class="row g-3">
-    {% for item in intake_items %}
-      <div class="col-12 col-xl-6">
-        <div class="card surface-card card-shadow h-100 border-0">
-          <div class="card-header bg-white d-flex justify-content-between align-items-center">
-            <div class="fw-semibold">{{ item.title }}</div>
-            <span class="badge text-bg-light border">{{ item.category.title() }}</span>
-          </div>
-          <div class="card-body">
-            <div class="d-flex flex-wrap gap-2 mb-3">
-              <span class="badge text-bg-secondary">Updated {{ item.mtime_display }}</span>
-              {% for label, value in item.metadata %}
-                <span class="badge text-bg-light border">{{ label }}: {{ value }}</span>
+  <section class="card surface-card card-shadow border-0">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table inbox-table align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Title</th>
+              <th>App / Product</th>
+              <th>Requester</th>
+              <th>Created Date</th>
+              <th>Source Type</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if intake_items %}
+              {% for item in intake_items %}
+                <tr>
+                  <td><span class="badge {% if item.request_status == 'Converted' %}text-bg-success{% elif item.request_status == 'Reviewed' %}text-bg-info{% elif item.request_status == 'Closed' %}text-bg-secondary{% else %}text-bg-warning{% endif %}">{{ item.request_status }}</span></td>
+                  <td>
+                    <div class="fw-semibold">{{ item.request_title }}</div>
+                    <div class="text-secondary small">{{ item.request_details[:160] if item.request_details else 'No details recorded.' }}</div>
+                  </td>
+                  <td><span class="badge text-bg-light border">{{ item.app_project }}</span></td>
+                  <td>{{ item.requester_name }}{% if item.requester_email %}<div class="text-secondary small">{{ item.requester_email }}</div>{% endif %}</td>
+                  <td class="text-nowrap">{{ item.created_at or item.mtime_display }}</td>
+                  <td><span class="badge text-bg-light border">{{ item.source_type }}</span></td>
+                  <td>
+                    <div class="d-flex flex-wrap gap-2">
+                      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('view_file', relative_path=item.path) }}">View</a>
+                      {% if item.request_status != 'Converted' %}
+                        <form method="post" action="{{ url_for('intake') }}">
+                          <input type="hidden" name="action" value="convert">
+                          <input type="hidden" name="request_path" value="{{ item.path }}">
+                          <button class="btn btn-primary btn-sm" type="submit">Convert To Idea</button>
+                        </form>
+                      {% else %}
+                        <span class="badge text-bg-success align-self-center">Converted to Idea</span>
+                      {% endif %}
+                    </div>
+                  </td>
+                </tr>
               {% endfor %}
-            </div>
-            {% if plain_mode %}
-              <div class="mb-2"><strong>What it is:</strong> {{ item.summary }}</div>
-              <div class="mb-2"><strong>Why it matters:</strong> {{ item.why_it_matters }}</div>
-              <div class="mb-2"><strong>Next step:</strong> {{ item.next_action or 'TBD' }}</div>
             {% else %}
-              <div class="doc-body small">{{ item.excerpt_html | safe }}</div>
+              <tr>
+                <td colspan="7" class="p-4">
+                  <div class="text-secondary">No user requests yet.</div>
+                </td>
+              </tr>
             {% endif %}
-          </div>
-          <div class="card-footer bg-white d-flex justify-content-between align-items-center">
-            <a href="{{ url_for('view_file', relative_path=item.path) }}">Open source</a>
-            <span class="text-secondary small">{{ item.path }}</span>
-          </div>
-        </div>
+          </tbody>
+        </table>
       </div>
-    {% endfor %}
-  </div>
+    </div>
+  </section>
 {% endblock %}

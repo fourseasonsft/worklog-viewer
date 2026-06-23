@@ -186,7 +186,7 @@ def _nav_items() -> list[dict[str, str]]:
         {
             "label": "More",
             "items": [
-                {"label": "Structured Intake", "endpoint": "intake"},
+                {"label": "User Requests", "endpoint": "intake"},
                 {"label": "Portfolio Status", "endpoint": "view_file", "args": {"relative_path": "00-dashboard/portfolio-status.md"}},
                 {"label": "Engineering Priorities", "endpoint": "view_file", "args": {"relative_path": "00-dashboard/engineering-priorities.md"}},
                 {"label": "Roadmap", "endpoint": "roadmap"},
@@ -213,6 +213,136 @@ def _relative_md_files(relative_dir: str) -> list[Path]:
     if not root.exists():
         return []
     return [path for path in sorted(root.rglob("*.md")) if path.is_file()]
+
+
+def _ensure_user_requests_dir() -> None:
+    _user_requests_dir().mkdir(parents=True, exist_ok=True)
+
+
+def _user_requests_dir() -> Path:
+    return WORKLOG_ROOT / "04-inbox/requests"
+
+
+def _request_source_type_label(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    mapping = {
+        "customer": "Customer",
+        "employee": "Employee",
+        "vendor": "Vendor",
+        "internal": "Internal",
+        "unknown": "Unknown",
+    }
+    return mapping.get(normalized, "Unknown")
+
+
+def _parse_user_request_item(path: Path) -> dict[str, str]:
+    data = _parse_structured_inbox_item(path)
+    text = path.read_text(encoding="utf-8")
+    current_section = None
+    for line in text.splitlines():
+        if line.startswith("- ") and ":" in line[2:]:
+            key, value = line[2:].split(":", 1)
+            data[key.strip().lower().replace(" ", "_")] = value.strip()
+        elif line.startswith("## "):
+            current_section = line[3:].strip().lower().replace(" ", "_")
+            data.setdefault(current_section, "")
+        elif current_section and line.strip():
+            data[current_section] = (data.get(current_section, "") + "\n" + line).strip()
+    data["request_title"] = data.get("request_title") or data.get("title") or path.stem.replace("-", " ").title()
+    data["request_details"] = data.get("request_details") or data.get("plain_english_summary") or data.get("technical_notes") or data["request_title"]
+    data["requester_name"] = data.get("requester_name") or data.get("requested_by") or "Unknown"
+    data["requester_email"] = data.get("requester_email") or ""
+    data["organization"] = data.get("organization") or ""
+    data["source_type"] = _request_source_type_label(data.get("source_type"))
+    data["request_status"] = (data.get("request_status") or data.get("status") or "New").title()
+    data["app_project"] = data.get("app_project") or data.get("app") or "Worklog"
+    data["created_at"] = data.get("created_at") or data.get("created_date") or ""
+    data["updated_at"] = data.get("updated_at") or ""
+    data["mtime"] = _file_mtime(path)
+    data["mtime_display"] = _format_file_timestamp(path)
+    data["path"] = str(path.relative_to(WORKLOG_ROOT))
+    return data
+
+
+def _user_requests_items() -> list[dict[str, str]]:
+    _ensure_user_requests_dir()
+    items = [_parse_user_request_item(path) for path in sorted(_user_requests_dir().glob("*.md")) if path.is_file()]
+    items.sort(key=lambda item: (item.get("mtime", 0), item["path"]), reverse=True)
+    return items
+
+
+def _slugify_request_title(value: str) -> str:
+    return _slugify_title(value)
+
+
+def _create_user_request_from_form(form: dict[str, str]) -> Path:
+    _ensure_user_requests_dir()
+    title = (form.get("request_title") or form.get("title") or "").strip() or "Untitled Request"
+    details = (form.get("request_details") or form.get("details") or "").strip()
+    requester_name = (form.get("requester_name") or form.get("requested_by") or "").strip() or "Unknown"
+    requester_email = (form.get("requester_email") or "").strip()
+    organization = (form.get("organization") or "").strip()
+    source_type = _request_source_type_label(form.get("source_type"))
+    app_project = (form.get("app_project") or form.get("app") or "").strip() or "worklog"
+    created_at = datetime.now(timezone.utc).isoformat()
+    filename = f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}-{_slugify_request_title(title)}.md"
+    target = _user_requests_dir() / filename
+    if target.exists():
+        target = _user_requests_dir() / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H%M%S')}-{_slugify_request_title(title)}.md"
+    content = "\n".join(
+        [
+            f"# {title}",
+            "",
+            f"- request_title: {title}",
+            f"- request_details: {details}",
+            f"- requester_name: {requester_name}",
+            f"- requester_email: {requester_email}",
+            f"- organization: {organization}",
+            f"- source_type: {source_type}",
+            f"- request_status: New",
+            f"- app_project: {app_project}",
+            f"- created_at: {created_at}",
+            f"- updated_at: {created_at}",
+            "",
+            "## Request Details",
+            details or "TBD",
+            "",
+        ]
+    )
+    target.write_text(content, encoding="utf-8")
+    return target
+
+
+def _update_user_request_file(path: Path, updates: dict[str, str]) -> None:
+    text = path.read_text(encoding="utf-8")
+    for key, value in updates.items():
+        pattern = rf"^- {re.escape(key)}: .*?$"
+        replacement = f"- {key}: {value}"
+        if re.search(pattern, text, flags=re.M):
+            text = re.sub(pattern, replacement, text, flags=re.M)
+        else:
+            insert_at = text.find("\n\n")
+            if insert_at == -1:
+                text += f"\n{replacement}"
+            else:
+                text = text[: insert_at + 2] + f"{replacement}\n" + text[insert_at + 2 :]
+    text = re.sub(r"^- updated_at: .*?$", f"- updated_at: {datetime.now(timezone.utc).isoformat()}", text, flags=re.M)
+    path.write_text(text, encoding="utf-8")
+
+
+def _convert_user_request_to_idea(path: Path) -> Path:
+    request = _parse_user_request_item(path)
+    message_parts = [
+        request.get("request_title") or request.get("title") or "User Request",
+        request.get("request_details") or "",
+        f"Requester: {request.get('requester_name') or 'Unknown'}",
+        f"Email: {request.get('requester_email') or ''}",
+        f"Organization: {request.get('organization') or ''}",
+        f"Source Type: {request.get('source_type') or 'Unknown'}",
+    ]
+    thought_path = _write_thought_file("\n".join(part for part in message_parts if part).strip())
+    _update_user_request_file(path, {"request_status": "Converted"})
+    return thought_path
 
 
 def _file_mtime(path: Path) -> float:
@@ -3559,20 +3689,30 @@ def inbox_closed():
 
 
 @app.route("/intake", methods=["GET", "POST"])
+@app.route("/requests", methods=["GET", "POST"])
 @_require_worklog_session
 def intake():
     if request.method == "POST":
-        created_path = _create_inbox_item_from_form(request.form)
+        action = (request.form.get("action") or "create").strip().lower()
+        if action == "convert":
+            request_path = request.form.get("request_path") or ""
+            if not request_path:
+                return {"ok": False, "error": "request_path is required"}, 400
+            converted_path = _convert_user_request_to_idea(_resolve_worklog_path(request_path))
+            return redirect(url_for("view_file", relative_path=str(converted_path.relative_to(WORKLOG_ROOT))))
+        created_path = _create_user_request_from_form(request.form)
         return redirect(url_for("view_file", relative_path=str(created_path.relative_to(WORKLOG_ROOT))))
 
     intake_counts = _dashboard_intake_counts()
-    intake_items = _all_structured_inbox_items()[:8]
+    intake_items = _user_requests_items()[:8]
     plain_mode = _intake_plain_mode_enabled()
     return render_template(
         "intake.html",
         intake_counts=intake_counts,
         intake_items=intake_items,
         plain_mode=plain_mode,
+        request_status_options=["New", "Reviewed", "Converted", "Closed"],
+        request_source_types=["Customer", "Employee", "Vendor", "Internal", "Unknown"],
     )
 
 

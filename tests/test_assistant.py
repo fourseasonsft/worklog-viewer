@@ -39,6 +39,7 @@ class WorklogAssistantTests(unittest.TestCase):
             "04-inbox/bugs",
             "04-inbox/features",
             "04-inbox/support",
+            "04-inbox/requests",
             "04-inbox/thought-box",
             "04-inbox/thought-box/digested",
             "04-inbox/thought-box/archived",
@@ -130,6 +131,65 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("global-quick-capture-modal", html)
         self.assertIn("global-quick-capture-text", html)
         self.assertIn("global-quick-capture-save", html)
+
+    def test_user_requests_page_renders(self) -> None:
+        html = self._client().get("/intake").get_data(as_text=True)
+        self.assertIn("User Requests", html)
+        self.assertIn("Create User Request", html)
+        self.assertNotIn("Structured Intake", html)
+
+    def test_create_user_request_and_list_it(self) -> None:
+        response = self._client().post(
+            "/intake",
+            data={
+                "action": "create",
+                "request_title": "Add dashboard shortcut",
+                "request_details": "Create a direct shortcut to the command center.",
+                "requester_name": "David",
+                "requester_email": "david@example.com",
+                "organization": "FSFT",
+                "source_type": "Customer",
+                "app_project": "worklog",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        items = viewer_app._user_requests_items()
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["request_status"], "New")
+        html = self._client().get("/intake").get_data(as_text=True)
+        self.assertIn("Add dashboard shortcut", html)
+        self.assertIn("Customer", html)
+
+    def test_convert_user_request_to_idea(self) -> None:
+        self._client().post(
+            "/intake",
+            data={
+                "action": "create",
+                "request_title": "Fix intake copy",
+                "request_details": "Rename the intake page to User Requests.",
+                "requester_name": "David",
+                "requester_email": "david@example.com",
+                "organization": "FSFT",
+                "source_type": "Internal",
+                "app_project": "worklog",
+            },
+        )
+        request_item = viewer_app._user_requests_items()[0]
+        response = self._client().post(
+            "/intake",
+            data={
+                "action": "convert",
+                "request_path": request_item["path"],
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        items = viewer_app._user_requests_items()
+        self.assertEqual(items[0]["request_status"], "Converted")
+        html = self._client().get("/assistant").get_data(as_text=True)
+        self.assertIn("Fix intake copy", html)
+        self.assertIn("Rename the intake page to User Requests.", html)
 
     def test_message_stores_raw_idea(self) -> None:
         response = self._client().post(
