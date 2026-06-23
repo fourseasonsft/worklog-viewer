@@ -87,7 +87,7 @@
                 <tr>
                   <td><span class="badge {% if item.request_status == 'Converted' %}text-bg-success{% elif item.request_status == 'Reviewed' %}text-bg-info{% elif item.request_status == 'Closed' %}text-bg-secondary{% else %}text-bg-warning{% endif %}">{{ item.request_status }}</span></td>
                   <td>
-                    <div class="fw-semibold">{{ item.request_title }}</div>
+                    <div class="fw-semibold"><a href="{{ url_for('request_detail', request_id=item.request_id or item.path) }}">{{ item.request_title }}</a></div>
                     <div class="text-secondary small">{{ item.request_details[:160] if item.request_details else 'No details recorded.' }}</div>
                   </td>
                   <td><span class="badge text-bg-light border">{{ item.app_project }}</span></td>
@@ -96,7 +96,7 @@
                   <td><span class="badge text-bg-light border">{{ item.source_type }}</span></td>
                   <td>
                     <div class="d-flex flex-wrap gap-2">
-                      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('view_file', relative_path=item.path) }}">View</a>
+                      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('request_detail', request_id=item.request_id or item.path) }}">View</a>
                       {% if item.request_status != 'Converted' %}
                         <form method="post" action="{{ url_for('intake') }}">
                           <input type="hidden" name="action" value="convert">

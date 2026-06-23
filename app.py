@@ -53,6 +53,7 @@ PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 THOUGHT_BOX_DIR = WORKLOG_ROOT / "04-inbox/thought-box"
 SPRINT_HANDOFFS_DIR = WORKLOG_ROOT / "05-sprint-handoffs"
 SPRINTS_ROOT_DIR = WORKLOG_ROOT / "06-sprints"
+USER_NOTIFICATIONS_DIR = WORKLOG_ROOT / "04-inbox/notifications"
 INTAKE_TYPE_BUCKETS = {
     "bug": "bugs",
     "feature": "features",
@@ -194,6 +195,7 @@ def _nav_items() -> list[dict[str, str]]:
                 {"label": "Runbooks", "endpoint": "runbooks"},
                 {"label": "Decisions", "endpoint": "decisions"},
                 {"label": "Release Notes", "endpoint": "release_notes"},
+                {"label": "Notifications", "endpoint": "notifications_preview"},
                 {"label": "Ideas", "endpoint": "ideas"},
                 {"label": "Inbox", "endpoint": "inbox"},
             ],
@@ -219,8 +221,16 @@ def _ensure_user_requests_dir() -> None:
     _user_requests_dir().mkdir(parents=True, exist_ok=True)
 
 
+def _ensure_user_notifications_dir() -> None:
+    _user_notifications_dir().mkdir(parents=True, exist_ok=True)
+
+
 def _user_requests_dir() -> Path:
     return WORKLOG_ROOT / "04-inbox/requests"
+
+
+def _user_notifications_dir() -> Path:
+    return WORKLOG_ROOT / "04-inbox/notifications"
 
 
 def _request_source_type_label(value: str | None) -> str:
@@ -258,6 +268,8 @@ def _parse_user_request_item(path: Path) -> dict[str, str]:
     data["app_project"] = data.get("app_project") or data.get("app") or "Worklog"
     data["created_at"] = data.get("created_at") or data.get("created_date") or ""
     data["updated_at"] = data.get("updated_at") or ""
+    data["request_id"] = data.get("request_id") or data.get("id") or str(path.relative_to(WORKLOG_ROOT))
+    data["idea_path"] = data.get("idea_path") or ""
     data["mtime"] = _file_mtime(path)
     data["mtime_display"] = _format_file_timestamp(path)
     data["path"] = str(path.relative_to(WORKLOG_ROOT))
@@ -269,6 +281,216 @@ def _user_requests_items() -> list[dict[str, str]]:
     items = [_parse_user_request_item(path) for path in sorted(_user_requests_dir().glob("*.md")) if path.is_file()]
     items.sort(key=lambda item: (item.get("mtime", 0), item["path"]), reverse=True)
     return items
+
+
+def _request_record_by_id(request_id: str) -> dict[str, str] | None:
+    request_id = (request_id or "").strip()
+    for item in _user_requests_items():
+        if request_id in {item.get("request_id"), item.get("path"), Path(item.get("path") or "").name}:
+            return item
+    return None
+
+
+def _notifications_for_request(request_id: str) -> list[dict[str, str]]:
+    request_id = (request_id or "").strip()
+    if not request_id:
+        return []
+    return [item for item in _notification_items() if item.get("request_id") == request_id or item.get("request_id") == request_id or item.get("request_title") == request_id]
+
+
+def _parse_notification_item(path: Path) -> dict[str, str]:
+    text = path.read_text(encoding="utf-8")
+    data = _parse_key_value_metadata(text)
+    data["path"] = str(path.relative_to(WORKLOG_ROOT))
+    data["title"] = data.get("title") or path.stem.replace("-", " ").title()
+    data["request_id"] = data.get("request_id") or ""
+    data["email"] = data.get("email") or ""
+    data["notification_type"] = data.get("notification_type") or ""
+    data["status"] = (data.get("status") or "pending").lower()
+    data["sent_at"] = data.get("sent_at") or ""
+    data["error_message"] = data.get("error_message") or ""
+    data["subject"] = data.get("subject") or ""
+    data["body"] = data.get("body") or _extract_section_text(text, "Body")
+    data["generated_at"] = data.get("generated_at") or data.get("created_at") or _format_file_timestamp(path)
+    data["request_title"] = data.get("request_title") or ""
+    data["idea_path"] = data.get("idea_path") or ""
+    data["sprint_code"] = data.get("sprint_code") or ""
+    data["sprint_path"] = data.get("sprint_path") or ""
+    data["mtime"] = _file_mtime(path)
+    data["mtime_display"] = _format_file_timestamp(path)
+    return data
+
+
+def _notification_items() -> list[dict[str, str]]:
+    _ensure_user_notifications_dir()
+    items = [_parse_notification_item(path) for path in sorted(_user_notifications_dir().glob("*.md")) if path.is_file()]
+    items.sort(key=lambda item: (item.get("mtime", 0), item["path"]), reverse=True)
+    return items
+
+
+def _create_request_live_notifications_for_sprint(record: dict[str, object]) -> list[Path]:
+    created: list[Path] = []
+    request_ids = list(dict.fromkeys([
+        *[str(item).strip() for item in record.get("source_request_ids", []) if str(item).strip()],
+        *[str(item).strip() for item in record.get("source_request_paths", []) if str(item).strip()],
+    ]))
+    if not request_ids:
+        source_thoughts = _resolve_sprint_source_thoughts(record)
+        for thought in source_thoughts:
+            request_path = str(thought.get("source_request_path") or "").strip()
+            request_id = str(thought.get("source_request_id") or request_path or "").strip()
+            if request_id:
+                request_ids.append(request_id)
+    for request_id in dict.fromkeys(request_ids):
+        request_record = _request_record_by_id(request_id)
+        if not request_record:
+            continue
+        created.append(
+            _create_notification_event(
+                request_id=request_record["request_id"],
+                email=request_record.get("requester_email") or "",
+                notification_type="request_live",
+                status="generated",
+                subject="Your request is now live",
+                body="\n".join(
+                    [
+                        "Your request has been implemented and deployed to production.",
+                        "",
+                        "Request:",
+                        request_record.get("request_title") or request_record.get("title") or "User Request",
+                        "",
+                        "What changed:",
+                        str(record.get("plain_english_release_notes") or "Not recorded yet"),
+                        "",
+                        "Thank you for helping improve the platform.",
+                    ]
+                ),
+                request_title=request_record.get("request_title") or request_record.get("title") or "",
+                sprint_code=str(record.get("sprint_code") or record.get("intended_sprint_code") or ""),
+                sprint_path=str(record.get("path") or ""),
+            )
+        )
+    if not created:
+        source_titles = {str(item).strip().lower() for item in record.get("source_idea_summaries", []) if str(item).strip()}
+        if not source_titles:
+            source_titles = {str(item).strip().lower() for item in record.get("canonical_source_ideas", []) if str(item).strip()}
+        source_thought_paths = {str(item).strip() for item in record.get("source_thought_paths", []) if str(item).strip()}
+        if source_titles:
+            for request_record in _user_requests_items():
+                haystack = " ".join(
+                    [
+                        str(request_record.get("request_title") or ""),
+                        str(request_record.get("request_details") or ""),
+                    ]
+                ).lower()
+                request_idea_path = str(request_record.get("idea_path") or "").strip()
+                path_matches = request_idea_path and request_idea_path in source_thought_paths
+                if not path_matches and not any(title and title in haystack for title in source_titles):
+                    continue
+                created.append(
+                    _create_notification_event(
+                        request_id=request_record["request_id"],
+                        email=request_record.get("requester_email") or "",
+                        notification_type="request_live",
+                        status="generated",
+                        subject="Your request is now live",
+                        body="\n".join(
+                            [
+                                "Your request has been implemented and deployed to production.",
+                                "",
+                                "Request:",
+                                request_record.get("request_title") or request_record.get("title") or "User Request",
+                                "",
+                                "What changed:",
+                                str(record.get("plain_english_release_notes") or "Not recorded yet"),
+                                "",
+                                "Thank you for helping improve the platform.",
+                            ]
+                        ),
+                        request_title=request_record.get("request_title") or request_record.get("title") or "",
+                        sprint_code=str(record.get("sprint_code") or record.get("intended_sprint_code") or ""),
+                        sprint_path=str(record.get("path") or ""),
+                    )
+                )
+                break
+    if not created:
+        converted_requests = [item for item in _user_requests_items() if str(item.get("request_status") or "").lower() == "converted" and str(item.get("idea_path") or "").strip()]
+        if len(converted_requests) == 1:
+            request_record = converted_requests[0]
+            created.append(
+                _create_notification_event(
+                    request_id=request_record["request_id"],
+                    email=request_record.get("requester_email") or "",
+                    notification_type="request_live",
+                    status="generated",
+                    subject="Your request is now live",
+                    body="\n".join(
+                        [
+                            "Your request has been implemented and deployed to production.",
+                            "",
+                            "Request:",
+                            request_record.get("request_title") or request_record.get("title") or "User Request",
+                            "",
+                            "What changed:",
+                            str(record.get("plain_english_release_notes") or "Not recorded yet"),
+                            "",
+                            "Thank you for helping improve the platform.",
+                        ]
+                    ),
+                    request_title=request_record.get("request_title") or request_record.get("title") or "",
+                    sprint_code=str(record.get("sprint_code") or record.get("intended_sprint_code") or ""),
+                    sprint_path=str(record.get("path") or ""),
+                )
+            )
+    return created
+
+
+def _create_notification_event(
+    *,
+    request_id: str,
+    email: str = "",
+    notification_type: str,
+    status: str = "pending",
+    subject: str,
+    body: str,
+    request_title: str = "",
+    idea_path: str = "",
+    sprint_code: str = "",
+    sprint_path: str = "",
+    error_message: str = "",
+) -> Path:
+    _ensure_user_notifications_dir()
+    generated_at = datetime.now(timezone.utc).isoformat()
+    filename = f"{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H%M%S')}-{_slugify_title(notification_type)}-{_slugify_title(request_title or request_id)}.md"
+    target = _user_notifications_dir() / filename
+    if target.exists():
+        target = _user_notifications_dir() / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H%M%S')}-{_slugify_title(notification_type)}-{_slugify_title(request_title or request_id)}-1.md"
+    target.write_text(
+        "\n".join(
+            [
+                f"# Notification: {notification_type}",
+                "",
+                f"- request_id: {request_id}",
+                f"- request_title: {request_title}",
+                f"- email: {email}",
+                f"- notification_type: {notification_type}",
+                f"- status: {status}",
+                f"- sent_at: {''}",
+                f"- generated_at: {generated_at}",
+                f"- error_message: {error_message}",
+                f"- subject: {subject}",
+                f"- idea_path: {idea_path}",
+                f"- sprint_code: {sprint_code}",
+                f"- sprint_path: {sprint_path}",
+                "",
+                "## Body",
+                body,
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return target
 
 
 def _slugify_request_title(value: str) -> str:
@@ -289,10 +511,12 @@ def _create_user_request_from_form(form: dict[str, str]) -> Path:
     target = _user_requests_dir() / filename
     if target.exists():
         target = _user_requests_dir() / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H%M%S')}-{_slugify_request_title(title)}.md"
+    request_id = str(target.relative_to(WORKLOG_ROOT))
     content = "\n".join(
         [
             f"# {title}",
             "",
+            f"- request_id: {request_id}",
             f"- request_title: {title}",
             f"- request_details: {details}",
             f"- requester_name: {requester_name}",
@@ -310,6 +534,29 @@ def _create_user_request_from_form(form: dict[str, str]) -> Path:
         ]
     )
     target.write_text(content, encoding="utf-8")
+    _create_notification_event(
+        request_id=request_id,
+        email=requester_email,
+        notification_type="request_received",
+        status="pending",
+        subject="We've received your request",
+        body="\n".join(
+            [
+                "Thank you for your request.",
+                "",
+                "We have received and recorded your request and added it to our review queue.",
+                "",
+                "Request:",
+                title,
+                "",
+                "Reference:",
+                request_id,
+                "",
+                "We will notify you again if the request enters our development workflow.",
+            ]
+        ),
+        request_title=title,
+    )
     return target
 
 
@@ -341,7 +588,36 @@ def _convert_user_request_to_idea(path: Path) -> Path:
         f"Source Type: {request.get('source_type') or 'Unknown'}",
     ]
     thought_path = _write_thought_file("\n".join(part for part in message_parts if part).strip())
-    _update_user_request_file(path, {"request_status": "Converted"})
+    _update_thought_file(
+        thought_path,
+        {
+            "source_request_path": str(path.relative_to(WORKLOG_ROOT)),
+            "source_request_id": str(path.relative_to(WORKLOG_ROOT)),
+            "source_request_title": request.get("request_title") or request.get("title") or "",
+            "status": "raw",
+            "digest_status": "not_digested",
+        },
+    )
+    _update_user_request_file(path, {"request_status": "Converted", "idea_path": str(thought_path.relative_to(WORKLOG_ROOT))})
+    _create_notification_event(
+        request_id=str(path.relative_to(WORKLOG_ROOT)),
+        email=request.get("requester_email") or "",
+        notification_type="entered_development",
+        status="pending",
+        subject="Your request has entered development",
+        body="\n".join(
+            [
+                "Your request has been reviewed and entered our development workflow.",
+                "",
+                "Request:",
+                request.get("request_title") or request.get("title") or "User Request",
+                "",
+                "We will notify you again if this request is released into production.",
+            ]
+        ),
+        request_title=request.get("request_title") or request.get("title") or "",
+        idea_path=str(thought_path.relative_to(WORKLOG_ROOT)),
+    )
     return thought_path
 
 
@@ -976,6 +1252,8 @@ def _write_proposed_sprint_record(group: dict[str, object]) -> Path:
             f"- source_thought_ids: {', '.join(str(item) for item in group.get('source_thought_ids', []))}",
             f"- source_thought_paths: {', '.join(str(item) for item in group.get('source_thought_paths', []))}",
             f"- proposed_source_thoughts: {', '.join(proposed_source_thoughts)}",
+            f"- source_request_paths: {', '.join(str(item) for item in group.get('source_request_paths', []))}",
+            f"- source_request_ids: {', '.join(str(item) for item in group.get('source_request_ids', []))}",
             "",
             "## Source Ideas",
             *([f"- {item}" for item in source_idea_summaries] or [f"- {item}" for item in source_thoughts] or ["- None"]),
@@ -1429,6 +1707,8 @@ def _parse_proposed_sprint_record(path: Path) -> dict[str, object]:
     sprint_id = meta.get("sprint_id") or meta.get("proposal_id") or path.stem.split("-", 1)[0]
     source_ideas = []
     proposed_work = []
+    source_request_paths = []
+    source_request_ids = []
     current_section = None
     for line in text.splitlines():
         if line.startswith("## "):
@@ -1446,6 +1726,14 @@ def _parse_proposed_sprint_record(path: Path) -> dict[str, object]:
             value = line[2:].strip()
             if value and value.lower() != "none":
                 proposed_work.append(value)
+        elif current_section == "source request paths" and line.startswith("- "):
+            value = line[2:].strip()
+            if value and value.lower() != "none":
+                source_request_paths.append(value)
+        elif current_section == "source request ids" and line.startswith("- "):
+            value = line[2:].strip()
+            if value and value.lower() != "none":
+                source_request_ids.append(value)
     return {
         "id": sprint_id,
         "sprint_id": sprint_id,
@@ -1459,6 +1747,8 @@ def _parse_proposed_sprint_record(path: Path) -> dict[str, object]:
         "updated_at": meta.get("updated_at") or _format_file_timestamp(path),
         "source_thought_ids": [item.strip() for item in (meta.get("source_thought_ids") or "").split(",") if item.strip()],
         "source_thought_paths": [item.strip() for item in (meta.get("source_thought_paths") or "").split(",") if item.strip()],
+        "source_request_paths": source_request_paths,
+        "source_request_ids": source_request_ids,
         "proposed_source_thoughts": [item.strip() for item in (meta.get("proposed_source_thoughts") or "").split(",") if item.strip()],
         "source_created_ats": [item.strip() for item in (meta.get("source_created_ats") or "").split(",") if item.strip()],
         "source_ideas": _dedupe_text_list(source_ideas),
@@ -1556,6 +1846,8 @@ def _approve_proposed_sprint_record(record: dict[str, object]) -> dict[str, obje
         "source_thought_paths": [item["path"] for item in active_thoughts],
         "source_thought_ids": [_thought_item_fingerprint(item) for item in active_thoughts],
         "source_idea_summaries": [item.get("normalized_summary") or item.get("display_snippet") or item.get("title") for item in active_thoughts],
+        "source_request_paths": [str(item.get("source_request_path") or "").strip() for item in active_thoughts if str(item.get("source_request_path") or "").strip()],
+        "source_request_ids": [str(item.get("source_request_id") or item.get("source_request_path") or "").strip() for item in active_thoughts if str(item.get("source_request_id") or item.get("source_request_path") or "").strip()],
         "proposed_work": record.get("proposed_work") or [item.get("normalized_summary") or item.get("display_snippet") or item.get("title") for item in active_thoughts],
         "status": "approved",
     }
@@ -1624,6 +1916,8 @@ def _proposal_to_sprint_record(proposal: dict[str, object]) -> tuple[dict[str, o
         "selected_thought_ids": proposal_source_ids,
         "source_thought_paths": proposal_source_paths,
         "source_thought_ids": proposal_source_ids,
+        "source_request_paths": sorted({str(item.get("source_request_path") or "").strip() for item in active_thoughts if str(item.get("source_request_path") or "").strip()}),
+        "source_request_ids": sorted({str(item.get("source_request_id") or item.get("source_request_path") or "").strip() for item in active_thoughts if str(item.get("source_request_id") or item.get("source_request_path") or "").strip()}),
         "digested_source_thoughts": [],
     }
     handoff_path = _write_sprint_handoff_file(sprint_record)
@@ -1704,6 +1998,8 @@ def _write_sprint_record(group: dict[str, object], status: str = "approved") -> 
     source_thoughts = [str(item) for item in group.get("source_thoughts", [])]
     source_idea_summaries = [str(item) for item in group.get("source_idea_summaries", [])]
     source_thought_paths = [str(item) for item in group.get("source_thought_paths", [])]
+    source_request_paths = [str(item) for item in group.get("source_request_paths", [])]
+    source_request_ids = [str(item) for item in group.get("source_request_ids", [])]
     digested_thoughts = [str(item) for item in group.get("digested_source_thoughts", [])]
     canonical_source_ideas = [str(item) for item in group.get("canonical_source_ideas", [])]
     app_product = str(group.get("app_product") or "Other")
@@ -1725,6 +2021,10 @@ def _write_sprint_record(group: dict[str, object], status: str = "approved") -> 
             f"- handoff_path: {handoff_path}",
             f"- purpose: {group.get('purpose') or ''}",
             f"- recommended_first_step: {group.get('recommended_first_step') or ''}",
+            f"- internal_release_notes: {group.get('internal_release_notes') or ''}",
+            f"- plain_english_release_notes: {group.get('plain_english_release_notes') or ''}",
+            f"- source_request_paths: {', '.join(source_request_paths)}",
+            f"- source_request_ids: {', '.join(source_request_ids)}",
             "",
             "## Source Ideas",
             *([f"- {item}" for item in source_idea_summaries] or [f"- {item}" for item in source_thoughts] or ["- None"]),
@@ -1732,8 +2032,20 @@ def _write_sprint_record(group: dict[str, object], status: str = "approved") -> 
             "## Source Thought Paths",
             *([f"- {item}" for item in source_thought_paths] or ["- None"]),
             "",
+            "## Source Request Paths",
+            *([f"- {item}" for item in source_request_paths] or ["- None"]),
+            "",
+            "## Source Request IDs",
+            *([f"- {item}" for item in source_request_ids] or ["- None"]),
+            "",
             "## Source Idea Summaries",
             *([f"- {item}" for item in source_idea_summaries] or ["- None"]),
+            "",
+            "## Internal Release Notes",
+            str(group.get("internal_release_notes") or "Not recorded yet"),
+            "",
+            "## Plain English Release Notes",
+            str(group.get("plain_english_release_notes") or "Not recorded yet"),
             "",
             "## Digested Source Ideas",
             *([f"- {item}" for item in digested_thoughts] or ["- None"]),
@@ -1785,8 +2097,12 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
     source_thought_paths = []
     source_ideas = []
     source_idea_summaries = []
+    source_request_paths = []
+    source_request_ids = []
     digested_source_thoughts = []
     proposed_work = []
+    internal_release_notes = ""
+    plain_english_release_notes = ""
     current_section = None
     for line in text.splitlines():
         if line.startswith("## "):
@@ -1806,6 +2122,14 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
             value = line[2:].strip()
             if value and value.lower() != "none":
                 source_idea_summaries.append(value)
+        elif current_section == "source request paths" and line.startswith("- "):
+            value = line[2:].strip()
+            if value and value.lower() != "none":
+                source_request_paths.append(value)
+        elif current_section == "source request ids" and line.startswith("- "):
+            value = line[2:].strip()
+            if value and value.lower() != "none":
+                source_request_ids.append(value)
         elif current_section == "digested source ideas" and line.startswith("- "):
             value = line[2:].strip()
             if value and value.lower() != "none":
@@ -1814,6 +2138,12 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
             value = line[2:].strip()
             if value and value.lower() != "none":
                 proposed_work.append(value)
+        elif current_section == "internal release notes":
+            if line.strip():
+                internal_release_notes = (internal_release_notes + "\n" + line.strip()).strip()
+        elif current_section == "plain english release notes":
+            if line.strip():
+                plain_english_release_notes = (plain_english_release_notes + "\n" + line.strip()).strip()
     handoff_path = meta.get("handoff_path") or ""
     handoff_markdown = ""
     if handoff_path:
@@ -1840,6 +2170,8 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
         "source_thoughts": _dedupe_text_list(source_thoughts),
         "source_ideas": _dedupe_text_list(source_ideas),
         "source_thought_paths": source_thought_paths,
+        "source_request_paths": source_request_paths,
+        "source_request_ids": source_request_ids,
         "source_idea_summaries": _dedupe_text_list(source_idea_summaries or source_ideas or source_thoughts),
         "canonical_source_ideas": _dedupe_text_list(source_idea_summaries or source_ideas or source_thoughts),
         "digested_source_thoughts": digested_source_thoughts,
@@ -1848,6 +2180,8 @@ def _parse_sprint_record(path: Path) -> dict[str, object]:
         "handoff_path": handoff_path,
         "handoff_markdown": handoff_markdown,
         "handoff_md": _extract_section_text(text, "Handoff Preview"),
+        "internal_release_notes": meta.get("internal_release_notes") or internal_release_notes,
+        "plain_english_release_notes": meta.get("plain_english_release_notes") or plain_english_release_notes,
         "raw_html": _render_markdown(text),
         "starting_prompt": meta.get("starting_prompt") or _extract_section_text(text, "Codex/ChatGPT Starting Prompt"),
         "completion_requirement": meta.get("completion requirement") or _extract_section_text(text, "Completion Requirement"),
@@ -2096,12 +2430,18 @@ def _update_thought_file(path: Path, updates: dict[str, str]) -> None:
     source = updates.get("source") or item.get("source") or "David"
     thought_fingerprint = updates.get("thought_fingerprint") or item.get("thought_fingerprint") or ""
     source_inbox_path = updates.get("source_inbox_path") or item.get("source_inbox_path") or ""
+    source_request_path = updates.get("source_request_path") or item.get("source_request_path") or ""
+    source_request_id = updates.get("source_request_id") or item.get("source_request_id") or ""
+    source_request_title = updates.get("source_request_title") or item.get("source_request_title") or ""
     lines = [
         f"# {title}",
         "",
         f"- created_at: {created_at}" if created_at else None,
         f"- source: {source}",
         f"- source_inbox_path: {source_inbox_path}" if source_inbox_path else None,
+        f"- source_request_path: {source_request_path}" if source_request_path else None,
+        f"- source_request_id: {source_request_id}" if source_request_id else None,
+        f"- source_request_title: {source_request_title}" if source_request_title else None,
         f"- status: {updates.get('status') or item.get('status') or 'raw'}",
         f"- digest_status: {updates.get('digest_status') or item.get('digest_status') or 'not_digested'}",
         f"- thought_fingerprint: {thought_fingerprint}" if thought_fingerprint else None,
@@ -2452,6 +2792,12 @@ def _update_sprint_record(record_path: Path, status: str) -> Path:
     if new_path != record_path:
         record_path.rename(new_path)
     new_path.write_text(text, encoding="utf-8")
+    if status == "shipped":
+        try:
+            record = _parse_sprint_record(new_path)
+            _create_request_live_notifications_for_sprint(record)
+        except Exception:
+            pass
     return new_path
 
 
@@ -2966,6 +3312,8 @@ def _proposal_from_digest_group(group: dict[str, object]) -> dict[str, object]:
     source_thought_paths = [thought.get("path") for thought in thoughts if thought.get("path")]
     source_thought_ids = [_thought_item_fingerprint(thought) for thought in thoughts if thought.get("path")]
     source_created_ats = [thought.get("created_at") or "" for thought in thoughts if thought.get("path")]
+    source_request_paths = [str(thought.get("source_request_path") or "").strip() for thought in thoughts if str(thought.get("source_request_path") or "").strip()]
+    source_request_ids = [str(thought.get("source_request_id") or thought.get("source_request_path") or "").strip() for thought in thoughts if str(thought.get("source_request_id") or thought.get("source_request_path") or "").strip()]
     return {
         **group,
         "proposal_id": group.get("proposal_id") or _generate_proposal_id(),
@@ -2977,6 +3325,8 @@ def _proposal_from_digest_group(group: dict[str, object]) -> dict[str, object]:
         "source_thought_paths": source_thought_paths,
         "source_thought_ids": source_thought_ids,
         "source_created_ats": source_created_ats,
+        "source_request_paths": source_request_paths,
+        "source_request_ids": source_request_ids,
         "source_idea_summaries": source_idea_summaries,
         "proposed_work": _source_idea_strings(thoughts) or group.get("proposed_work") or source_idea_summaries,
         "canonical_source_ideas": source_idea_summaries,
@@ -3713,6 +4063,34 @@ def intake():
         plain_mode=plain_mode,
         request_status_options=["New", "Reviewed", "Converted", "Closed"],
         request_source_types=["Customer", "Employee", "Vendor", "Internal", "Unknown"],
+    )
+
+
+@app.route("/requests/<path:request_id>", methods=["GET"])
+@_require_worklog_session
+def request_detail(request_id: str):
+    record = _request_record_by_id(request_id)
+    if not record:
+        abort(404)
+    notifications = _notifications_for_request(record["request_id"])
+    idea = _parse_thought_file(WORKLOG_ROOT / record["idea_path"]) if record.get("idea_path") and (WORKLOG_ROOT / record["idea_path"]).exists() else None
+    return render_template(
+        "request_detail.html",
+        title=record["request_title"],
+        request_record=record,
+        related_idea=idea,
+        notifications=notifications,
+    )
+
+
+@app.route("/notifications", methods=["GET"])
+@_require_worklog_session
+def notifications_preview():
+    return render_template(
+        "notifications.html",
+        title="Notification Preview",
+        notifications=_notification_items(),
+        request_count=len(_user_requests_items()),
     )
 
 

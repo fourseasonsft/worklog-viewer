@@ -39,6 +39,7 @@ class WorklogAssistantTests(unittest.TestCase):
             "04-inbox/bugs",
             "04-inbox/features",
             "04-inbox/support",
+            "04-inbox/notifications",
             "04-inbox/requests",
             "04-inbox/thought-box",
             "04-inbox/thought-box/digested",
@@ -190,6 +191,50 @@ class WorklogAssistantTests(unittest.TestCase):
         html = self._client().get("/assistant").get_data(as_text=True)
         self.assertIn("Fix intake copy", html)
         self.assertIn("Rename the intake page to User Requests.", html)
+
+    def test_request_creation_creates_pending_notification(self) -> None:
+        response = self._client().post(
+            "/intake",
+            data={
+                "action": "create",
+                "request_title": "Notify requester",
+                "request_details": "Send a notification when a request is received.",
+                "requester_name": "David",
+                "requester_email": "david@example.com",
+                "organization": "FSFT",
+                "source_type": "Internal",
+                "app_project": "worklog",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        notifications = viewer_app._notification_items()
+        self.assertTrue(any(item["notification_type"] == "request_received" for item in notifications))
+        detail_html = self._client().get(f"/requests/{viewer_app._user_requests_items()[0]['path']}").get_data(as_text=True)
+        self.assertIn("Notification History", detail_html)
+        self.assertIn("request_received", detail_html)
+
+    def test_convert_user_request_creates_entered_development_notification(self) -> None:
+        self._client().post(
+            "/intake",
+            data={
+                "action": "create",
+                "request_title": "Notify development",
+                "request_details": "Notify when work starts.",
+                "requester_name": "David",
+                "requester_email": "david@example.com",
+                "organization": "FSFT",
+                "source_type": "Internal",
+                "app_project": "worklog",
+            },
+        )
+        request_item = viewer_app._user_requests_items()[0]
+        self._client().post("/intake", data={"action": "convert", "request_path": request_item["path"]}, follow_redirects=True)
+        notifications = viewer_app._notification_items()
+        self.assertTrue(any(item["notification_type"] == "entered_development" for item in notifications))
+        thought = viewer_app._thought_box_items(digested_only=False)[0]
+        self.assertEqual(thought.get("source_request_path"), request_item["path"])
+        self.assertEqual(thought.get("source_request_id"), request_item["path"])
 
     def test_message_stores_raw_idea(self) -> None:
         response = self._client().post(
@@ -719,6 +764,107 @@ class WorklogAssistantTests(unittest.TestCase):
         self.assertIn("Worklog needs a new shortcut.", text)
         html = response.get_data(as_text=True)
         self.assertIn("Idea details updated.", html)
+
+    def test_sprint_detail_exposes_release_notes_fields(self) -> None:
+        path = self.root / "06-sprints/approved/sp-20260623000000-release-notes.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "\n".join(
+                [
+                    "# Sprint Queue Record: Release Notes",
+                    "",
+                    "- sprint_id: sp-20260623000000",
+                    "- sprint_code: WL-SPRINT-20260623-006",
+                    "- app_product: Worklog",
+                    "- sprint_group_name: Release Notes",
+                    "- status: approved",
+                    "- scope: Small",
+                    "- idea_count: 1",
+                    "- created_at: 2026-06-23T10:00:00Z",
+                    "- updated_at: 2026-06-23T10:00:00Z",
+                    "- handoff_path: 05-sprint-handoffs/release-notes.md",
+                    "- internal_release_notes: Internal note",
+                    "- plain_english_release_notes: Plain English note",
+                    "- source_request_paths: 04-inbox/requests/2026-06-23-notify.md",
+                    "- source_request_ids: 04-inbox/requests/2026-06-23-notify.md",
+                    "",
+                    "## Source Ideas",
+                    "- Release note idea.",
+                    "",
+                    "## Source Request Paths",
+                    "- 04-inbox/requests/2026-06-23-notify.md",
+                    "",
+                    "## Source Request IDs",
+                    "- 04-inbox/requests/2026-06-23-notify.md",
+                    "",
+                    "## Source Idea Summaries",
+                    "- Release note idea.",
+                    "",
+                    "## Proposed Work",
+                    "- Release note idea.",
+                    "",
+                    "## Handoff Markdown",
+                    "05-sprint-handoffs/release-notes.md",
+                    "",
+                    "## Codex/ChatGPT Starting Prompt",
+                    "Prompt",
+                    "",
+                    "## Completion Requirement",
+                    "When this sprint is complete, update Worklog using Sprint Code WL-SPRINT-20260623-006.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        html = self._client().get("/sprints/sp-20260623000000").get_data(as_text=True)
+        self.assertIn("Internal Release Notes", html)
+        self.assertIn("Plain English Release Notes", html)
+        self.assertIn("User Request Traceability", html)
+
+    def test_notifications_preview_renders(self) -> None:
+        html = self._client().get("/notifications").get_data(as_text=True)
+        self.assertIn("Notification Preview", html)
+        self.assertIn("pending", html.lower())
+
+    def test_shipped_sprint_creates_live_request_notification(self) -> None:
+        self._client().post(
+            "/intake",
+            data={
+                "action": "create",
+                "request_title": "Release me",
+                "request_details": "Send a live notification on ship.",
+                "requester_name": "David",
+                "requester_email": "david@example.com",
+                "organization": "FSFT",
+                "source_type": "Internal",
+                "app_project": "worklog",
+            },
+        )
+        request_item = viewer_app._user_requests_items()[0]
+        self._client().post("/intake", data={"action": "convert", "request_path": request_item["path"]}, follow_redirects=True)
+        thought = viewer_app._thought_box_items(digested_only=False)[0]
+        preview = self._client().post(
+            "/api/assistant/digest-preview",
+            json={"selected_idea_ids": [thought["thought_id"]], "selected_only": True},
+        ).get_json()["digest_preview"]
+        proposal = self._client().post(
+            "/api/assistant/create-proposed-sprints",
+            json={"digest_preview": preview, "action": "accept_suggested"},
+        ).get_json()["created_proposed_sprints"][0]
+        self._client().post(
+            f"/sprints/{proposal['proposal_id']}/action",
+            data={"action": "approve"},
+            follow_redirects=True,
+        )
+        approved = viewer_app._sprint_record_by_code(proposal["sprint_code"])
+        self.assertIsNotNone(approved)
+        self._client().post(
+            f"/sprints/{approved['id']}/action",
+            data={"action": "ship", "confirm": "yes"},
+            follow_redirects=True,
+        )
+        notifications = viewer_app._notification_items()
+        self.assertTrue(any(item["notification_type"] == "request_live" for item in notifications))
 
     def test_daily_log_helper_creates_and_preserves_existing_file(self) -> None:
         helper = Path("/opt/fsftdev/fsft-worklog/scripts/create_daily_log.py")
