@@ -265,13 +265,13 @@ class WorklogSprintQueueTests(unittest.TestCase):
         )
 
     def test_sprint_queue_page_renders(self) -> None:
-        self._create_sprint_record("approved")
+        self._create_sprint_record("active")
         html = self._client().get("/sprints").get_data(as_text=True)
         self.assertIn("Sprint Queue", html)
         self.assertIn("Sprint Code", html)
         self.assertIn("IMS Sprint", html)
-        self.assertIn("Start Sprint", html)
         self.assertIn("onchange=\"this.form.requestSubmit()\"", html)
+        self.assertIn("Mark Complete", html)
         self.assertIn("Mark Done", html)
 
     def test_proposed_filter_renders_proposed_rows(self) -> None:
@@ -288,7 +288,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
         client = self._client()
         response = client.post(
             f"/sprints/code/{record['sprint_code']}/action",
-            data={"action": "done", "confirm": "yes"},
+            data={"action": "mark_done", "confirm": "yes"},
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
@@ -315,7 +315,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
         )
         response = self._client().post(
             "/sprints/code/OTHER-SPRINT-20260620-001/action",
-            data={"action": "done", "confirm": "yes"},
+            data={"action": "mark_done", "confirm": "yes"},
         )
         self.assertEqual(response.status_code, 409)
         self.assertIn("Duplicate sprint code conflict", response.get_data(as_text=True))
@@ -330,7 +330,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertEqual(record["status_key"], "shipped")
         response = self._client().post(
             "/sprints/code/OTHER-SPRINT-20260620-001/action",
-            data={"action": "done", "confirm": "yes"},
+            data={"action": "mark_done", "confirm": "yes"},
         )
         self.assertEqual(response.status_code, 409)
         self.assertIn("Duplicate sprint code conflict", response.get_data(as_text=True))
@@ -350,7 +350,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
         record_id = viewer_app._sprint_records()[0]["id"]
         response = self._client().post(
             "/sprints/code/OTHER-SPRINT-20260620-002/action",
-            data={"action": "done", "confirm": "yes"},
+            data={"action": "mark_done", "confirm": "yes"},
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
@@ -574,6 +574,15 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("Copy Prompt", html)
         self.assertIn("Copy Handoff", html)
         self.assertIn("Mark Staged", html)
+        self.assertIn("Mark Done", html)
+
+    def test_active_detail_shows_mark_complete_and_mark_done(self) -> None:
+        self._create_sprint_record("active")
+        html = self._client().get("/sprints/sp-20260620120000-active").get_data(as_text=True)
+        self.assertIn("Mark Complete", html)
+        self.assertIn("Mark Done", html)
+        self.assertIn("Mark Complete generates draft release notes for review.", html)
+        self.assertIn("Mark Done moves the sprint to the Done queue for later Codex reconciliation.", html)
 
     def test_transitions_work(self) -> None:
         self._create_sprint_record("approved")
@@ -596,6 +605,57 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         shipped_path = self.root / "06-sprints/shipped/sp-20260620120000-approved-ims-sprint.md"
         self.assertTrue(shipped_path.exists())
+
+    def test_mark_complete_generates_release_notes(self) -> None:
+        self._create_sprint_record("active", app_product="Worklog", title="Worklog Sprint")
+        client = self._client()
+        response = client.post(
+            "/sprints/sp-20260620120000-active/action",
+            data={"action": "complete"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Draft release notes generated. Please review before shipping.", response.get_data(as_text=True))
+        completed_record = viewer_app._sprint_record_by_id("sp-20260620120000-active")
+        self.assertIsNotNone(completed_record)
+        self.assertEqual(completed_record["status_key"], "completed")
+        self.assertTrue(completed_record.get("internal_release_notes"))
+        self.assertTrue(completed_record.get("plain_english_release_notes"))
+        detail_html = client.get("/sprints/sp-20260620120000-active").get_data(as_text=True)
+        self.assertIn("Mark Done", detail_html)
+        self.assertIn("Release Notes", detail_html)
+
+    def test_mark_complete_uses_complete_action(self) -> None:
+        self._create_sprint_record("approved")
+        response = self._client().post(
+            "/sprints/sp-20260620120000-approved/action",
+            data={"action": "complete"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Draft release notes generated. Please review before shipping.", response.get_data(as_text=True))
+        record = viewer_app._sprint_record_by_id("sp-20260620120000-approved")
+        self.assertEqual(record["status_key"], "completed")
+
+    def test_shared_completed_status_update_backfills_release_notes(self) -> None:
+        path = self._create_sprint_record("approved", title="Worklog Sprint", app_product="Worklog")
+        completed_path = viewer_app._update_sprint_record(path, "completed")
+        record = viewer_app._parse_sprint_record(completed_path)
+        self.assertEqual(record["status_key"], "completed")
+        self.assertTrue(str(record.get("internal_release_notes") or "").strip())
+        self.assertTrue(str(record.get("plain_english_release_notes") or "").strip())
+
+    def test_mark_done_alias_still_routes_to_done_flow(self) -> None:
+        self._create_sprint_record("active", app_product="Worklog", title="Worklog Sprint")
+        response = self._client().post(
+            "/sprints/code/WL-SPRINT-20260620-001/action",
+            data={"action": "mark_done", "confirm": "yes"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        record = viewer_app._sprint_record_by_code("WL-SPRINT-20260620-001")
+        self.assertIsNotNone(record)
+        self.assertEqual(record["status_key"], "done")
 
     def test_proposed_rescind_restores_ideas(self) -> None:
         self._create_proposed_sprint_record()
@@ -1103,15 +1163,57 @@ class WorklogSprintQueueTests(unittest.TestCase):
         client = self._client()
         response = client.post(
             "/sprints/code/IMS-SPRINT-20260620-001/action",
-            data={"confirm": "yes", "action": "stage", "completion_notes": "Validated in browser."},
+            data={"confirm": "yes", "action": "complete", "completion_notes": "Validated in browser."},
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
         record = viewer_app._sprint_record_by_code("IMS-SPRINT-20260620-001")
         self.assertIsNotNone(record)
-        self.assertEqual(record["status_key"], "staged")
-        text = (self.root / "06-sprints/staged/sp-20260620120000-approved-ims-sprint.md").read_text(encoding="utf-8")
+        self.assertEqual(record["status_key"], "completed")
+        text = (self.root / record["path"]).read_text(encoding="utf-8")
         self.assertIn("Validated in browser.", text)
+        self.assertIn("- internal_release_notes:", text)
+        self.assertIn("- plain_english_release_notes:", text)
+
+    def test_mark_complete_generates_release_notes_when_missing(self) -> None:
+        self._create_sprint_record("approved", title="Worklog Sprint", app_product="Worklog")
+        client = self._client()
+        response = client.post(
+            "/sprints/sp-20260620120000-approved/action",
+            data={"action": "complete"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        record = viewer_app._sprint_record_by_id("sp-20260620120000-approved")
+        self.assertIsNotNone(record)
+        self.assertEqual(record["status_key"], "completed")
+        path = self.root / record["path"]
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("- internal_release_notes:", text)
+        self.assertIn("- plain_english_release_notes:", text)
+        self.assertIn("Draft release notes generated. Please review before shipping.", response.get_data(as_text=True))
+        html = client.get(f"/sprints/{record['id']}").get_data(as_text=True)
+        self.assertIn("Internal Release Notes", html)
+        self.assertIn("Plain English Release Notes", html)
+
+    def test_existing_release_notes_are_preserved_on_complete(self) -> None:
+        path = self._create_sprint_record("approved", title="Worklog Sprint", app_product="Worklog")
+        viewer_app._update_sprint_record_text(
+            path,
+            {
+                "internal_release_notes": "Existing internal note.",
+                "plain_english_release_notes": "Existing plain note.",
+            },
+        )
+        client = self._client()
+        response = client.post("/sprints/sp-20260620120000-approved/action", data={"action": "complete"}, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        record = viewer_app._sprint_record_by_id("sp-20260620120000-approved")
+        self.assertIsNotNone(record)
+        updated = (self.root / record["path"]).read_text(encoding="utf-8")
+        self.assertIn("Existing internal note.", updated)
+        self.assertIn("Existing plain note.", updated)
+        self.assertNotIn("Draft release notes generated. Please review before shipping.", response.get_data(as_text=True))
 
     def test_approval_creates_sprint_record_and_handoff(self) -> None:
         preview = viewer_app._digest_preview(viewer_app._thought_box_items(digested_only=False))

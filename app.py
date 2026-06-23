@@ -2798,6 +2798,11 @@ def _update_sprint_record(record_path: Path, status: str) -> Path:
             _create_request_live_notifications_for_sprint(record)
         except Exception:
             pass
+    if status == "completed":
+        try:
+            _generate_release_notes_draft(new_path)
+        except Exception:
+            pass
     return new_path
 
 
@@ -2809,6 +2814,57 @@ def _append_sprint_completion_notes(record_path: Path, notes: str) -> Path:
     text = re.sub(r"^- updated_at: .*?$", f"- updated_at: {datetime.now(timezone.utc).isoformat()}", text, flags=re.M)
     record_path.write_text(text, encoding="utf-8")
     return record_path
+
+
+def _generate_release_notes_draft(record_path: Path) -> bool:
+    if not record_path.exists():
+        return False
+    record = _parse_sprint_record(record_path)
+    def _normalize_release_notes(value: object) -> str:
+        text = str(value or "").strip()
+        if text.lower() in {"not recorded yet", "none", "n/a"}:
+            return ""
+        return text
+
+    internal_existing = _normalize_release_notes(record.get("internal_release_notes"))
+    plain_existing = _normalize_release_notes(record.get("plain_english_release_notes"))
+    if internal_existing and plain_existing:
+        return False
+
+    source_ideas = _source_idea_strings(_resolve_sprint_source_thoughts(record))
+    proposed_work = [str(item).strip() for item in record.get("canonical_proposed_work") or record.get("proposed_work") or [] if str(item).strip()]
+    completion_text = _extract_section_text(record_path.read_text(encoding="utf-8"), "Completion Notes")
+    changes: dict[str, str] = {}
+    if not internal_existing:
+        internal_lines = [
+            f"{record.get('title') or record.get('sprint_group_name') or 'Sprint'} was completed and is ready for review.",
+            "",
+            "Sprint Code:",
+            str(record.get("sprint_code") or record.get("intended_sprint_code") or ""),
+            "",
+            "Source Ideas:",
+            *([f"- {item}" for item in source_ideas] or ["- None recorded."]),
+            "",
+            "Proposed Work:",
+            *([f"- {item}" for item in proposed_work] or ["- None recorded."]),
+        ]
+        if completion_text:
+            internal_lines.extend(["", "Completion Notes:", completion_text])
+        changes["internal_release_notes"] = "\n".join(line for line in internal_lines if line is not None).strip()
+    if not plain_existing:
+        plain_lines = [
+            f"We finished {record.get('title') or record.get('sprint_group_name') or 'this sprint'}.",
+            "",
+            "What changed:",
+            *([f"- {item}" for item in source_ideas[:3]] or ["- No source ideas were recorded."]),
+        ]
+        if completion_text:
+            plain_lines.extend(["", "Review notes:", completion_text])
+        changes["plain_english_release_notes"] = "\n".join(line for line in plain_lines if line is not None).strip()
+    if not changes:
+        return False
+    _update_sprint_record_text(record_path, changes)
+    return True
 
 
 def _sprint_record_by_id(sprint_id: str) -> dict[str, object] | None:
@@ -4216,12 +4272,15 @@ def sprint_action(sprint_id: str):
     if action == "start":
         new_path = _update_sprint_record(record_path, "active")
     elif action == "complete":
+        should_flash_release_notes = not str(record.get("internal_release_notes") or "").strip() or not str(record.get("plain_english_release_notes") or "").strip()
         new_path = _update_sprint_record(record_path, "completed")
+        if should_flash_release_notes:
+            flash("Draft release notes generated. Please review before shipping.", "success")
     elif action == "stage":
         new_path = _update_sprint_record(record_path, "staged")
     elif action == "ship":
         new_path = _update_sprint_record(record_path, "shipped")
-    elif action == "done":
+    elif action in {"done", "mark_done"}:
         new_path = _mark_sprint_done(record, performed_by=str(session.get(WORKLOG_SESSION_KEY, {}).get("username") or session.get(WORKLOG_SESSION_KEY, {}).get("email") or "ui"))
         return redirect(url_for("sprints", status="done"))
     elif action == "regenerate_handoff":
@@ -4302,12 +4361,15 @@ def sprint_action_by_code(sprint_code: str):
     if action == "start":
         record_path = _update_sprint_record(record_path, "active")
     elif action == "complete":
+        should_flash_release_notes = not str(record.get("internal_release_notes") or "").strip() or not str(record.get("plain_english_release_notes") or "").strip()
         record_path = _update_sprint_record(record_path, "completed")
+        if should_flash_release_notes:
+            flash("Draft release notes generated. Please review before shipping.", "success")
     elif action == "stage":
         record_path = _update_sprint_record(record_path, "staged")
     elif action == "ship":
         record_path = _update_sprint_record(record_path, "shipped")
-    elif action == "done":
+    elif action in {"done", "mark_done"}:
         record_path = _mark_sprint_done(record, performed_by=str(session.get(WORKLOG_SESSION_KEY, {}).get("username") or session.get(WORKLOG_SESSION_KEY, {}).get("email") or "ui"))
         return redirect(url_for("sprints", status="done"))
     elif action == "regenerate_handoff":
