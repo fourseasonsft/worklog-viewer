@@ -317,7 +317,7 @@ class WorklogAssistantTests(unittest.TestCase):
 
     def test_recent_worklog_pages_shortcut_renders(self) -> None:
         html = self._client().get("/assistant").get_data(as_text=True)
-        self.assertIn("Recent Pages", html)
+        self.assertNotIn("Recent Pages", html)
 
     def test_create_proposed_sprints_from_suggested_groups(self) -> None:
         self._write_thought(

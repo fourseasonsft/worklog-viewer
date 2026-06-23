@@ -2301,11 +2301,11 @@ def _filter_sprint_records(records: list[dict[str, object]], status: str, app_sl
 
 
 def _sprint_counts_by_app() -> dict[str, dict[str, int]]:
-    counts = {app: {"proposed": 0, "approved": 0, "active": 0, "completed": 0, "staged": 0, "shipped": 0} for app in APP_FILTERS.values()}
+    counts = {app: {"proposed": 0, "approved": 0, "active": 0, "completed": 0, "staged": 0, "shipped": 0, "done": 0} for app in APP_FILTERS.values()}
     for record in _sprint_records():
         app = record.get("app_product") or "Other"
         if app not in counts:
-            counts[app] = {"proposed": 0, "approved": 0, "active": 0, "completed": 0, "staged": 0, "shipped": 0}
+            counts[app] = {"proposed": 0, "approved": 0, "active": 0, "completed": 0, "staged": 0, "shipped": 0, "done": 0}
         key = str(record.get("status_key") or "proposed")
         if key in counts[app]:
             counts[app][key] += 1
@@ -3385,6 +3385,27 @@ def inject_globals() -> dict[str, object]:
 @_require_worklog_session
 def dashboard():
     app_cards = [_parse_active_work_file(item["path"], item["title"]) for item in ACTIVE_WORK_FILES]
+    app_cards.append(
+        {
+            "slug": "other",
+            "title": "Other",
+            "path": "",
+            "has_active_sprint": False,
+            "current_sprint_name": "",
+            "current_sprint_percent": "",
+            "current_sprint_status": "",
+            "current_sprint_notes": "",
+            "last_sprint_name": "Not recorded",
+            "last_sprint_completed": "",
+            "last_sprint_outcome": "No completion note recorded.",
+            "next_suggested_sprint_name": "Not set",
+            "next_suggested_sprint_first_step": "No next action recorded.",
+            "next_suggested_sprint_why": "",
+            "blockers_count": 0,
+            "sprint_counts": {"proposed": 0, "approved": 0, "active": 0, "done": 0, "staged": 0, "shipped": 0},
+            "inbox_items": [],
+        }
+    )
     counts = _dashboard_counts()
     inbox_items = _recent_inbox_items()
     update_shipments = _assistant_update_shipments()

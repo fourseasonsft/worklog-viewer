@@ -294,16 +294,6 @@
               {% endif %}
             </div>
           {% endfor %}
-          {% if recent_worklog_pages %}
-            <div class="sidebar-section sidebar-recent">
-              <div class="small text-uppercase text-secondary fw-semibold mb-2">Recent Pages</div>
-              <nav class="nav flex-column gap-1">
-                {% for page in recent_worklog_pages %}
-                  <a class="px-2 py-1 rounded" href="{{ url_for('view_file', relative_path=page.path) }}">{{ page.title }}</a>
-                {% endfor %}
-              </nav>
-            </div>
-          {% endif %}
         </aside>
         <main class="col-12 col-md-9 col-xl-10 p-4">
           {% with messages = get_flashed_messages(with_categories=true) %}

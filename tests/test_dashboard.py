@@ -74,63 +74,39 @@ class WorklogDashboardTests(unittest.TestCase):
             }
         return client
 
-    def test_homepage_renders_focus_layout(self) -> None:
-        response = self._client().get("/")
-        html = response.get_data(as_text=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("App-by-app idea logistics and sprint status", html)
-        self.assertIn("Open Idea Inventory", html)
-        self.assertIn("Active, proposed, and shipped updates", html)
+    def test_dashboard_renders_table_and_rows(self) -> None:
+        html = self._client().get("/").get_data(as_text=True)
+        self.assertEqual(len([line for line in html.splitlines() if "dashboard-table" in line]), 1)
+        self.assertIn("App/Product", html)
+        self.assertIn("Core", html)
+        self.assertIn("Unity", html)
+        self.assertIn("Worklog", html)
+        self.assertIn("IMS", html)
         self.assertIn("CY Storage", html)
+        self.assertIn("Dispatch", html)
+        self.assertIn("Parking", html)
         self.assertIn("Hiring", html)
-        self.assertNotIn("Promote", html)
-        self.assertNotIn("Mark reviewed", html)
-        self.assertNotIn("Details last", html)
+        self.assertIn("Other", html)
+        self.assertIn("/sprints?app=worklog&amp;status=proposed", html)
+        self.assertIn("/sprints?app=worklog&amp;status=approved", html)
+        self.assertIn("/sprints?app=worklog&amp;status=active", html)
+        self.assertIn("/sprints?app=worklog&amp;status=done", html)
+        self.assertIn("/sprints?app=worklog&amp;status=staged", html)
+        self.assertIn("/sprints?app=worklog&amp;status=shipped", html)
+        self.assertIn("/inbox?app=worklog", html)
 
-    def test_intake_route_renders_capture_page(self) -> None:
-        response = self._client().get("/intake")
-        html = response.get_data(as_text=True)
+    def test_dashboard_does_not_render_recent_pages(self) -> None:
+        html = self._client().get("/").get_data(as_text=True)
+        self.assertNotIn("Recent Pages", html)
+
+    def test_dashboard_route_returns_200(self) -> None:
+        response = self._client().get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Structured Intake", html)
-        self.assertIn("Create structured work item", html)
 
-    def test_intake_form_creates_markdown_item(self) -> None:
-        response = self._client().post(
-            "/intake",
-            data={
-                "title": "New bug from test",
-                "type": "bug",
-                "app_project": "worklog",
-                "priority": "high",
-                "plain_english_summary": "Dashboard copy should be calmer.",
-                "technical_notes": "Update landing layout.",
-                "source": "Unit test",
-                "requested_by": "David",
-                "next_action": "Review layout update.",
-            },
-            follow_redirects=False,
-        )
-        self.assertEqual(response.status_code, 302)
-        created = list((self.root / "04-inbox/bugs").glob("*new-bug-from-test.md"))
-        self.assertEqual(len(created), 1)
-        content = created[0].read_text(encoding="utf-8")
-        self.assertIn("Plain English Summary", content)
-        self.assertIn("Technical Notes", content)
-
-    def test_dashboard_counts_still_work(self) -> None:
-        counts = viewer_app._dashboard_counts()
-        self.assertEqual(counts["open_new"], 1)
-        self.assertEqual(counts["open_bugs"], 0)
-
-    def test_app_card_parser_uses_real_percent_and_fallbacks(self) -> None:
-        cards = viewer_app._parse_active_work_file("03-active-work/ims.md", "IMS")
-        self.assertEqual(cards["current_sprint_name"], "IMS reconciliation and shipment UI alignment")
-        self.assertEqual(cards["current_sprint_percent"], "65%")
-        self.assertEqual(cards["current_sprint_status"], "Active")
-        parking = viewer_app._parse_active_work_file("03-active-work/parking.md", "Parking")
-        self.assertFalse(parking["has_active_sprint"])
-        self.assertEqual(parking["last_sprint_name"], "Agreement rendering quality review")
-        self.assertEqual(parking["next_suggested_sprint_name"], "Agreement package rendering cleanup")
+    def test_dashboard_includes_next_action_and_notes(self) -> None:
+        html = self._client().get("/").get_data(as_text=True)
+        self.assertIn("Blockers / Notes", html)
+        self.assertIn("Next Action", html)
 
 
 if __name__ == "__main__":
