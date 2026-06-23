@@ -77,6 +77,7 @@
                 <td>
                   <div class="d-flex flex-wrap gap-2">
                     <a class="btn btn-outline-primary btn-sm" href="{{ url_for('sprint_detail', sprint_id=record.id) }}">View</a>
+                    {% set can_mutate = not record.duplicate_conflict %}
                     {% if record.status_key == 'proposed' %}
                       <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
                         <input type="hidden" name="action" value="approve">
@@ -101,11 +102,15 @@
                         <input type="hidden" name="action" value="start">
                         <button class="btn btn-outline-secondary btn-sm" type="submit">Start Sprint</button>
                       </form>
-                      <form method="post" action="{{ url_for('sprint_action_by_code', sprint_code=record.sprint_code) }}">
-                        <input type="hidden" name="action" value="done">
-                        <input type="hidden" name="confirm" value="yes">
-                        <button class="btn btn-outline-dark btn-sm" type="submit">Mark Done</button>
-                      </form>
+                      {% if can_mutate %}
+                        <form method="post" action="{{ url_for('sprint_action_by_code', sprint_code=record.sprint_code) }}">
+                          <input type="hidden" name="action" value="done">
+                          <input type="hidden" name="confirm" value="yes">
+                          <button class="btn btn-outline-dark btn-sm" type="submit">Mark Done</button>
+                        </form>
+                      {% else %}
+                        <span class="badge text-bg-warning align-self-center">Duplicate code</span>
+                      {% endif %}
                       <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
                         <input type="hidden" name="action" value="rescind">
                         <input type="hidden" name="confirm" value="rescind this sprint and return its ideas to inventory?">
@@ -121,11 +126,15 @@
                         <input type="hidden" name="action" value="complete">
                         <button class="btn btn-outline-secondary btn-sm" type="submit">Complete Sprint</button>
                       </form>
-                      <form method="post" action="{{ url_for('sprint_action_by_code', sprint_code=record.sprint_code) }}">
-                        <input type="hidden" name="action" value="done">
-                        <input type="hidden" name="confirm" value="yes">
-                        <button class="btn btn-outline-dark btn-sm" type="submit">Mark Done</button>
-                      </form>
+                      {% if can_mutate %}
+                        <form method="post" action="{{ url_for('sprint_action_by_code', sprint_code=record.sprint_code) }}">
+                          <input type="hidden" name="action" value="done">
+                          <input type="hidden" name="confirm" value="yes">
+                          <button class="btn btn-outline-dark btn-sm" type="submit">Mark Done</button>
+                        </form>
+                      {% else %}
+                        <span class="badge text-bg-warning align-self-center">Duplicate code</span>
+                      {% endif %}
                       <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
                         <input type="hidden" name="action" value="rescind">
                         <input type="hidden" name="confirm" value="rescind this sprint and return its ideas to inventory?">
@@ -141,11 +150,15 @@
                         <input type="hidden" name="action" value="stage">
                         <button class="btn btn-outline-secondary btn-sm" type="submit">Mark Staged</button>
                       </form>
-                      <form method="post" action="{{ url_for('sprint_action_by_code', sprint_code=record.sprint_code) }}">
-                        <input type="hidden" name="action" value="done">
-                        <input type="hidden" name="confirm" value="yes">
-                        <button class="btn btn-outline-dark btn-sm" type="submit">Mark Done</button>
-                      </form>
+                      {% if can_mutate %}
+                        <form method="post" action="{{ url_for('sprint_action_by_code', sprint_code=record.sprint_code) }}">
+                          <input type="hidden" name="action" value="done">
+                          <input type="hidden" name="confirm" value="yes">
+                          <button class="btn btn-outline-dark btn-sm" type="submit">Mark Done</button>
+                        </form>
+                      {% else %}
+                        <span class="badge text-bg-warning align-self-center">Duplicate code</span>
+                      {% endif %}
                       <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
                         <input type="hidden" name="action" value="rescind">
                         <input type="hidden" name="confirm" value="rescind this sprint and return its ideas to inventory?">
@@ -161,11 +174,15 @@
                         <input type="hidden" name="action" value="ship">
                         <button class="btn btn-outline-secondary btn-sm" type="submit">Mark Shipped</button>
                       </form>
-                      <form method="post" action="{{ url_for('sprint_action_by_code', sprint_code=record.sprint_code) }}">
-                        <input type="hidden" name="action" value="done">
-                        <input type="hidden" name="confirm" value="yes">
-                        <button class="btn btn-outline-dark btn-sm" type="submit">Mark Done</button>
-                      </form>
+                      {% if can_mutate %}
+                        <form method="post" action="{{ url_for('sprint_action_by_code', sprint_code=record.sprint_code) }}">
+                          <input type="hidden" name="action" value="done">
+                          <input type="hidden" name="confirm" value="yes">
+                          <button class="btn btn-outline-dark btn-sm" type="submit">Mark Done</button>
+                        </form>
+                      {% else %}
+                        <span class="badge text-bg-warning align-self-center">Duplicate code</span>
+                      {% endif %}
                       <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
                         <input type="hidden" name="action" value="rescind">
                         <input type="hidden" name="confirm" value="rescind this sprint and return its ideas to inventory?">

@@ -57,6 +57,7 @@
       <div class="card-body p-4 p-xl-5">
         <div class="text-uppercase text-secondary small fw-semibold mb-2">Actions</div>
         <div class="d-flex flex-wrap gap-2">
+          {% set can_mutate = not record.duplicate_conflict %}
           {% if record.status_key == 'proposed' %}
             <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
               <input type="hidden" name="action" value="approve">
@@ -79,11 +80,15 @@
             <a class="btn btn-outline-secondary" href="{{ url_for('sprints') }}">Back to Sprint Queue</a>
           {% else %}
             {% if record.status_key in ['active', 'completed', 'staged'] or (record.status_key == 'approved') %}
-              <form method="post" action="{{ url_for('sprint_action_by_code', sprint_code=record.sprint_code) }}">
-                <input type="hidden" name="action" value="done">
-                <input type="hidden" name="confirm" value="yes">
-                <button class="btn btn-dark" type="submit">Mark Done</button>
-              </form>
+              {% if can_mutate %}
+                <form method="post" action="{{ url_for('sprint_action_by_code', sprint_code=record.sprint_code) }}">
+                  <input type="hidden" name="action" value="done">
+                  <input type="hidden" name="confirm" value="yes">
+                  <button class="btn btn-dark" type="submit">Mark Done</button>
+                </form>
+              {% else %}
+                <span class="badge text-bg-warning align-self-center">Duplicate code</span>
+              {% endif %}
             {% endif %}
             <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
               <input type="hidden" name="action" value="rescind">
@@ -199,6 +204,19 @@
             <div class="text-uppercase text-secondary small fw-semibold mb-2">Reconciliation Pending</div>
             <div class="alert alert-secondary mb-0">
               This sprint was marked done from the UI and requires Codex reconciliation.
+            </div>
+          </div>
+        {% endif %}
+        {% if record.duplicate_warning %}
+          <div class="mt-4">
+            <div class="text-uppercase text-secondary small fw-semibold mb-2">Duplicate Sprint Code</div>
+            <div class="alert alert-warning">
+              <div class="fw-semibold mb-2">{{ record.duplicate_warning }}</div>
+              <ul class="mb-0">
+                {% for item in record.duplicate_records or [] %}
+                  <li>{{ item.path }} ({{ item.status }}){% if item.created_at %} created {{ item.created_at }}{% endif %}{% if item.done_at %}, done {{ item.done_at }}{% endif %}{% if item.shipped_at %}, shipped {{ item.shipped_at }}{% endif %}</li>
+                {% endfor %}
+              </ul>
             </div>
           </div>
         {% endif %}

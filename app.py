@@ -2159,6 +2159,135 @@ def _sprint_records() -> list[dict[str, object]]:
     return records
 
 
+def _terminal_sprint_status_rank(status_key: str) -> int:
+    order = {
+        "shipped": 0,
+        "reconciled": 1,
+        "done": 2,
+        "staged": 3,
+        "completed": 4,
+        "active": 5,
+        "approved": 6,
+        "proposed": 7,
+        "rescinded": 8,
+        "deleted": 9,
+    }
+    return order.get(status_key, 99)
+
+
+def _sprint_code_duplicates() -> dict[str, list[dict[str, object]]]:
+    duplicates: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for record in _sprint_records():
+        code = str(record.get("sprint_code") or "").strip().upper()
+        if code:
+            duplicates[code].append(record)
+    return {code: records for code, records in duplicates.items() if len(records) > 1}
+
+
+def _sprint_duplicate_report_rows() -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for code, records in sorted(_sprint_code_duplicates().items()):
+        rows.append(
+            {
+                "sprint_code": code,
+                "records": [
+                    {
+                        "path": record.get("path"),
+                        "status": record.get("status_key"),
+                        "created_at": record.get("created_at"),
+                        "done_at": record.get("done_at"),
+                        "shipped_at": record.get("shipped_at"),
+                    }
+                    for record in records
+                ],
+                "canonical_path": _sprint_duplicate_canonical_record(records).get("path") if _sprint_duplicate_canonical_record(records) else "",
+            }
+        )
+    return rows
+
+
+def _sprint_duplicate_canonical_record(records: list[dict[str, object]]) -> dict[str, object] | None:
+    if not records:
+        return None
+    non_terminal = [record for record in records if record.get("status_key") in {"proposed", "approved", "active", "completed", "staged"}]
+    if len(non_terminal) == 1:
+        return non_terminal[0]
+    if len(non_terminal) > 1:
+        return None
+    ranked = sorted(records, key=lambda record: (
+        _terminal_sprint_status_rank(str(record.get("status_key") or "")),
+        str(record.get("done_at") or record.get("shipped_at") or ""),
+        str(record.get("updated_at") or ""),
+        str(record.get("created_at") or ""),
+        str(record.get("path") or ""),
+    ))
+    return ranked[0] if ranked else None
+
+
+def _sprint_duplicate_resolution_warning(records: list[dict[str, object]], canonical: dict[str, object] | None) -> str:
+    paths = ", ".join(str(record.get("path") or "") for record in records if str(record.get("path") or "").strip())
+    if canonical:
+        return f"Duplicate sprint code resolved to {canonical.get('path') or 'a canonical record'}; other matches: {paths}."
+    return f"Duplicate sprint code conflict across: {paths}."
+
+
+def _sprint_duplicate_match_details(records: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [
+        {
+            "path": record.get("path"),
+            "status": record.get("status_key"),
+            "created_at": record.get("created_at"),
+            "done_at": record.get("done_at"),
+            "shipped_at": record.get("shipped_at"),
+        }
+        for record in records
+    ]
+
+
+def _annotate_sprint_duplicate(record: dict[str, object], canonical: dict[str, object]) -> None:
+    record_path = WORKLOG_ROOT / str(record["path"])
+    canonical_path = str(canonical.get("path") or canonical.get("sprint_code") or "")
+    note = "\n".join(
+        [
+            "",
+            "## Duplicate Resolution",
+            f"- superseded_by: {canonical_path}",
+            f"- duplicate_resolution_note: Superseded by canonical sprint code lookup for {record.get('sprint_code') or ''}.",
+            f"- resolved_at: {datetime.now(timezone.utc).isoformat()}",
+            "",
+        ]
+    )
+    text = record_path.read_text(encoding="utf-8")
+    if "## Duplicate Resolution" not in text:
+        if not text.endswith("\n"):
+            text += "\n"
+        text += note
+        text = re.sub(r"^- updated_at: .*?$", f"- updated_at: {datetime.now(timezone.utc).isoformat()}", text, flags=re.M)
+        record_path.write_text(text, encoding="utf-8")
+
+
+def _move_sprint_to_duplicates(record: dict[str, object], canonical: dict[str, object]) -> Path | None:
+    source = WORKLOG_ROOT / str(record["path"])
+    if not source.exists():
+        return None
+    target_dir = _sprints_dir("duplicates")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / source.name
+    if target.exists():
+        target = target_dir / f"{source.stem}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}{source.suffix}"
+    source.rename(target)
+    record_path = target
+    text = record_path.read_text(encoding="utf-8")
+    if "## Duplicate Resolution" not in text:
+        text += "\n## Duplicate Resolution\n"
+        text += f"- superseded_by: {canonical.get('path') or canonical.get('sprint_code') or ''}\n"
+        text += f"- duplicate_resolution_note: Superseded by canonical sprint code lookup for {record.get('sprint_code') or ''}.\n"
+        text += f"- resolved_at: {datetime.now(timezone.utc).isoformat()}\n"
+        text = re.sub(r"^- updated_at: .*?$", f"- updated_at: {datetime.now(timezone.utc).isoformat()}", text, flags=re.M)
+        record_path.write_text(text, encoding="utf-8")
+    return target
+
+
 def _filter_sprint_records(records: list[dict[str, object]], status: str, app_slug: str) -> list[dict[str, object]]:
     status = (status or "all").lower()
     app_slug = _normalize_app_filter(app_slug)
@@ -2227,12 +2356,23 @@ def _sprint_record_by_code(sprint_code: str) -> dict[str, object] | None:
     records = [record for record in _sprint_records() if str(record.get("sprint_code") or "").strip().upper() == sprint_code]
     if not records:
         return None
-    preferred_statuses = ["proposed", "approved", "active", "completed", "staged", "shipped", "done", "reconciled", "rescinded", "deleted"]
-    for status in preferred_statuses:
-        for record in records:
-            if record.get("status_key") == status:
-                return record
-    return records[0]
+    canonical = _sprint_duplicate_canonical_record(records)
+    if canonical and len(records) > 1:
+        warning = _sprint_duplicate_resolution_warning(records, canonical)
+        canonical = {**canonical}
+        canonical["duplicate_warning"] = warning
+        canonical["duplicate_records"] = _sprint_duplicate_match_details(records)
+        canonical["duplicate_canonical_path"] = canonical.get("path")
+        canonical["duplicate_conflict"] = any(str(record.get("path") or "") != str(canonical.get("path") or "") for record in records)
+        return canonical
+    if records:
+        record = {**records[0]}
+        if len(records) > 1:
+            record["duplicate_warning"] = _sprint_duplicate_resolution_warning(records, None)
+            record["duplicate_records"] = _sprint_duplicate_match_details(records)
+            record["duplicate_conflict"] = True
+        return record
+    return None
 
 
 def _sprint_queue_dashboard_counts() -> dict[str, int]:
@@ -3596,6 +3736,8 @@ def sprint_action_by_code(sprint_code: str):
     record = _sprint_record_by_code(sprint_code)
     if not record:
         abort(404)
+    if record.get("duplicate_conflict"):
+        return {"ok": False, "error": "Duplicate sprint code conflict. Resolve duplicates before mutating by code.", "matches": record.get("duplicate_records", [])}, 409
     confirmation = (request.form.get("confirm") or "").strip().lower()
     if confirmation != "yes":
         return {"ok": False, "error": "Confirmation required to update sprint status by code."}, 400
