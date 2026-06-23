@@ -3,6 +3,9 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+import json
+import subprocess
+import os
 
 import app as viewer_app
 
@@ -242,6 +245,25 @@ class WorklogSprintQueueTests(unittest.TestCase):
     def _create_worklog_proposed_record(self, title: str = "Worklog Proposed") -> Path:
         return self._create_proposed_sprint_record(title=title, app_product="Worklog")
 
+    def _run_create_sprint_cli(self, *args: str, worklog_root: Path | None = None) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(Path("/opt/fsftdev/worklog-viewer"))
+        cmd = [
+            "/opt/fsftdev/worklog-viewer/.venv/bin/python",
+            "scripts/create_sprint.py",
+            *args,
+        ]
+        if worklog_root is not None:
+            cmd.extend(["--worklog-root", str(worklog_root)])
+        return subprocess.run(
+            cmd,
+            cwd="/opt/fsftdev/worklog-viewer",
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
     def test_sprint_queue_page_renders(self) -> None:
         self._create_sprint_record("approved")
         html = self._client().get("/sprints").get_data(as_text=True)
@@ -348,6 +370,111 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertEqual(record["status_key"], "shipped")
         self.assertFalse(record.get("duplicate_conflict"))
         self.assertEqual(record["path"], "06-sprints/shipped/sp-20260620221220-sprint.md")
+
+    def test_create_sprint_cli_creates_proposed_sprint(self) -> None:
+        result = self._run_create_sprint_cli(
+            "--app",
+            "Worklog",
+            "--title",
+            "Dashboard Portfolio Header Rotation",
+            "--source-idea",
+            "Portfolio table looks good from proposed to inbox; put the table headers at 45 degree angle.",
+            "--scope",
+            "Small",
+            worklog_root=self.root,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        created = list((self.root / "06-sprints/proposed").glob("*.md"))
+        self.assertEqual(len(created), 1)
+        content = created[0].read_text(encoding="utf-8")
+        self.assertIn("Dashboard Portfolio Header Rotation", content)
+        self.assertIn("Portfolio table looks good from proposed to inbox; put the table headers at 45 degree angle.", content)
+        self.assertIn("## Codex/ChatGPT Starting Prompt", content)
+        self.assertIn("## Handoff Preview", content)
+
+    def test_create_sprint_cli_does_not_duplicate_repeated_source_idea(self) -> None:
+        first = self._run_create_sprint_cli(
+            "--app",
+            "Worklog",
+            "--title",
+            "Dashboard Portfolio Header Rotation",
+            "--source-idea",
+            "Portfolio table looks good from proposed to inbox; put the table headers at 45 degree angle.",
+            "--scope",
+            "Small",
+            worklog_root=self.root,
+        )
+        self.assertEqual(first.returncode, 0, first.stderr)
+        second = self._run_create_sprint_cli(
+            "--app",
+            "Worklog",
+            "--title",
+            "Dashboard Portfolio Header Rotation",
+            "--source-idea",
+            "Portfolio table looks good from proposed to inbox; put the table headers at 45 degree angle.",
+            "--scope",
+            "Small",
+            worklog_root=self.root,
+        )
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIn("Duplicate sprint already exists", second.stdout)
+        self.assertEqual(len(list((self.root / "06-sprints/proposed").glob("*.md"))), 1)
+
+    def test_create_sprint_cli_preserves_multiple_source_ideas(self) -> None:
+        result = self._run_create_sprint_cli(
+            "--app",
+            "Worklog",
+            "--title",
+            "Dashboard Portfolio Header Rotation",
+            "--source-idea",
+            "First source idea.",
+            "--source-idea",
+            "Second source idea.",
+            "--scope",
+            "Small",
+            worklog_root=self.root,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        content = next((self.root / "06-sprints/proposed").glob("*.md")).read_text(encoding="utf-8")
+        self.assertIn("First source idea.", content)
+        self.assertIn("Second source idea.", content)
+
+    def test_create_sprint_cli_json_output(self) -> None:
+        result = self._run_create_sprint_cli(
+            "--app",
+            "Worklog",
+            "--title",
+            "Dashboard Portfolio Header Rotation",
+            "--source-idea",
+            "Portfolio table looks good from proposed to inbox; put the table headers at 45 degree angle.",
+            "--scope",
+            "Small",
+            "--json-output",
+            worklog_root=self.root,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout.strip())
+        self.assertTrue(payload["created"])
+        self.assertFalse(payload["duplicate"])
+        self.assertTrue(payload["sprint_code"])
+        self.assertTrue(payload["proposal_id"])
+        self.assertTrue(payload["record_path"])
+        self.assertIn("## Sprint Code", payload["handoff_preview"])
+
+    def test_create_sprint_cli_custom_worklog_root(self) -> None:
+        result = self._run_create_sprint_cli(
+            "--app",
+            "Worklog",
+            "--title",
+            "Custom Root Sprint",
+            "--source-idea",
+            "Custom root works.",
+            "--scope",
+            "Small",
+            worklog_root=self.root,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.root / "06-sprints/proposed").exists())
 
     def test_mark_done_does_not_appear_on_proposed_or_shipped(self) -> None:
         self._create_proposed_sprint_record()
