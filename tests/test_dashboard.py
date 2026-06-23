@@ -76,7 +76,8 @@ class WorklogDashboardTests(unittest.TestCase):
 
     def test_dashboard_renders_table_and_rows(self) -> None:
         html = self._client().get("/").get_data(as_text=True)
-        self.assertEqual(len([line for line in html.splitlines() if "dashboard-table" in line]), 1)
+        self.assertIn("dashboard-table", html)
+        self.assertIn("dashboard-table-th-rotated", html)
         self.assertIn("App/Product", html)
         self.assertIn("Core", html)
         self.assertIn("Unity", html)

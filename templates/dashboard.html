@@ -1,5 +1,46 @@
 {% extends "base.html" %}
 {% block content %}
+<style>
+  .dashboard-table thead th {
+    vertical-align: bottom;
+  }
+  .dashboard-table thead th.dashboard-table-th-rotated {
+    height: 9.5rem;
+    min-width: 5rem;
+    padding: 0.5rem 0.25rem 0.25rem;
+    vertical-align: bottom;
+    text-align: center;
+    position: relative;
+    overflow: visible;
+  }
+  .dashboard-table thead th.dashboard-table-th-rotated > span {
+    display: inline-block;
+    transform: rotate(-45deg);
+    transform-origin: bottom center;
+    white-space: nowrap;
+    position: absolute;
+    left: 50%;
+    bottom: 0.65rem;
+    translate: -50% 0;
+  }
+  .dashboard-table .dashboard-table-count {
+    text-align: center;
+    vertical-align: middle;
+  }
+  @media (max-width: 992px) {
+    .dashboard-table thead th.dashboard-table-th-rotated {
+      height: auto;
+      min-width: 4.5rem;
+      padding-top: 1rem;
+    }
+    .dashboard-table thead th.dashboard-table-th-rotated > span {
+      position: static;
+      display: inline-block;
+      transform: none;
+      translate: none;
+    }
+  }
+</style>
 <div class="worklog-shell">
   <section class="card surface-card card-shadow border-0 dashboard-hero mb-4">
     <div class="card-body p-4 p-xl-5">
@@ -36,13 +77,13 @@
             <tr>
               <th>App/Product</th>
               <th>Active Sprint</th>
-              <th>Proposed</th>
-              <th>Approved</th>
-              <th>Active</th>
-              <th>Done</th>
-              <th>Staged</th>
-              <th>Shipped</th>
-              <th>Inbox</th>
+              <th class="dashboard-table-th-rotated"><span>Proposed</span></th>
+              <th class="dashboard-table-th-rotated"><span>Approved</span></th>
+              <th class="dashboard-table-th-rotated"><span>Active</span></th>
+              <th class="dashboard-table-th-rotated"><span>Done</span></th>
+              <th class="dashboard-table-th-rotated"><span>Staged</span></th>
+              <th class="dashboard-table-th-rotated"><span>Shipped</span></th>
+              <th class="dashboard-table-th-rotated"><span>Inbox</span></th>
               <th>Blockers / Notes</th>
               <th>Next Action</th>
             </tr>
@@ -59,13 +100,13 @@
                     <span class="text-secondary small">{{ app.last_sprint_name or 'Not recorded' }}</span>
                   {% endif %}
                 </td>
-                <td><a class="badge text-bg-light border text-decoration-none" href="{{ url_for('sprints', app=app.slug, status='proposed') }}">{{ app.sprint_counts.proposed }}</a></td>
-                <td><a class="badge text-bg-light border text-decoration-none" href="{{ url_for('sprints', app=app.slug, status='approved') }}">{{ app.sprint_counts.approved }}</a></td>
-                <td><a class="badge text-bg-light border text-decoration-none" href="{{ url_for('sprints', app=app.slug, status='active') }}">{{ app.sprint_counts.active }}</a></td>
-                <td><a class="badge text-bg-light border text-decoration-none" href="{{ url_for('sprints', app=app.slug, status='done') }}">{{ app.sprint_counts.done }}</a></td>
-                <td><a class="badge text-bg-light border text-decoration-none" href="{{ url_for('sprints', app=app.slug, status='staged') }}">{{ app.sprint_counts.staged }}</a></td>
-                <td><a class="badge text-bg-light border text-decoration-none" href="{{ url_for('sprints', app=app.slug, status='shipped') }}">{{ app.sprint_counts.shipped }}</a></td>
-                <td><a class="badge text-bg-light border text-decoration-none" href="{{ url_for('inbox', app=app.slug) }}">{{ app.inbox_items|length if app.inbox_items else 0 }}</a></td>
+                <td class="dashboard-table-count"><a class="badge text-bg-light border text-decoration-none" href="{{ url_for('sprints', app=app.slug, status='proposed') }}">{{ app.sprint_counts.proposed }}</a></td>
+                <td class="dashboard-table-count"><a class="badge text-bg-light border text-decoration-none" href="{{ url_for('sprints', app=app.slug, status='approved') }}">{{ app.sprint_counts.approved }}</a></td>
+                <td class="dashboard-table-count"><a class="badge text-bg-light border text-decoration-none" href="{{ url_for('sprints', app=app.slug, status='active') }}">{{ app.sprint_counts.active }}</a></td>
+                <td class="dashboard-table-count"><a class="badge text-bg-light border text-decoration-none" href="{{ url_for('sprints', app=app.slug, status='done') }}">{{ app.sprint_counts.done }}</a></td>
+                <td class="dashboard-table-count"><a class="badge text-bg-light border text-decoration-none" href="{{ url_for('sprints', app=app.slug, status='staged') }}">{{ app.sprint_counts.staged }}</a></td>
+                <td class="dashboard-table-count"><a class="badge text-bg-light border text-decoration-none" href="{{ url_for('sprints', app=app.slug, status='shipped') }}">{{ app.sprint_counts.shipped }}</a></td>
+                <td class="dashboard-table-count"><a class="badge text-bg-light border text-decoration-none" href="{{ url_for('inbox', app=app.slug) }}">{{ app.inbox_items|length if app.inbox_items else 0 }}</a></td>
                 <td class="text-secondary small">
                   <div class="fw-semibold text-body">{{ app.blockers_count }} blocker{% if app.blockers_count != 1 %}s{% endif %}</div>
                   <div>{{ app.current_sprint_notes or app.last_sprint_outcome or 'No extra notes recorded.' }}</div>
