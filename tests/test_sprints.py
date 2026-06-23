@@ -972,6 +972,41 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("Handoff Preview", visible)
         self.assertIn("Codex Prompt", visible)
 
+    def test_sprint_detail_renders_release_note_edit_fields(self) -> None:
+        self._create_sprint_record("approved", app_product="Worklog", title="Worklog Sprint")
+        client = self._client()
+        html = client.get("/sprints/sp-20260620120000-approved").get_data(as_text=True)
+        self.assertIn("Internal Release Notes", html)
+        self.assertIn("Plain English Release Notes", html)
+        self.assertIn("Save Release Notes", html)
+
+    def test_sprint_detail_can_save_release_notes_and_preserve_metadata(self) -> None:
+        path = self._create_sprint_record("approved", app_product="Worklog", title="Worklog Sprint")
+        client = self._client()
+        response = client.post(
+            "/sprints/sp-20260620120000-approved",
+            data={
+                "action": "update_release_notes",
+                "internal_release_notes": "Internal rollout note.",
+                "plain_english_release_notes": "Plain English note.",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        updated = path.read_text(encoding="utf-8")
+        self.assertIn("- internal_release_notes: Internal rollout note.", updated)
+        self.assertIn("- plain_english_release_notes: Plain English note.", updated)
+        self.assertIn("- sprint_code: WL-SPRINT-20260620-001", updated)
+        self.assertIn("- status: approved", updated)
+        self.assertIn("- idea_count: 2", updated)
+        self.assertIn("Release notes updated.", response.get_data(as_text=True))
+        record = viewer_app._sprint_record_by_id("sp-20260620120000-approved")
+        self.assertIsNotNone(record)
+        self.assertEqual(record["status_key"], "approved")
+        self.assertEqual(record["sprint_code"], "WL-SPRINT-20260620-001")
+        self.assertEqual(record["internal_release_notes"], "Internal rollout note.")
+        self.assertEqual(record["plain_english_release_notes"], "Plain English note.")
+
     def test_sidebar_shows_single_inbox_link_and_pacific_timestamps(self) -> None:
         self._create_sprint_record("approved")
         html = self._client().get("/sprints").get_data(as_text=True)

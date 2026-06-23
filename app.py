@@ -4175,12 +4175,29 @@ def sprints():
     )
 
 
-@app.route("/sprints/<sprint_id>", methods=["GET"])
+@app.route("/sprints/<sprint_id>", methods=["GET", "POST"])
 @_require_worklog_session
 def sprint_detail(sprint_id: str):
     record = _sprint_record_by_id(sprint_id)
     if not record:
         abort(404)
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip().lower()
+        if action != "update_release_notes":
+            abort(400)
+        notes = {
+            "internal_release_notes": (request.form.get("internal_release_notes") or "").strip(),
+            "plain_english_release_notes": (request.form.get("plain_english_release_notes") or "").strip(),
+        }
+        record_path = WORKLOG_ROOT / str(record["path"])
+        _update_sprint_record_text(record_path, notes)
+        flash("Release notes updated.", "success")
+        updated_record = _sprint_record_by_id(sprint_id) or record
+        return render_template(
+            "sprint_detail.html",
+            title=updated_record["title"],
+            record=updated_record,
+        )
     return render_template(
         "sprint_detail.html",
         title=record["title"],

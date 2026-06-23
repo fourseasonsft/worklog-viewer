@@ -42,8 +42,6 @@
           <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Scope</div><div class="fw-semibold">{{ record.scope }}</div></div></div>
           <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Created</div><div class="fw-semibold">{{ record.created_at | display_timestamp }}</div></div></div>
           <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Updated</div><div class="fw-semibold">{{ record.updated_at | display_timestamp }}</div></div></div>
-          <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Internal Release Notes</div><div class="fw-semibold">{{ record.internal_release_notes or 'Not recorded yet' }}</div></div></div>
-          <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Plain English Release Notes</div><div class="fw-semibold">{{ record.plain_english_release_notes or 'Not recorded yet' }}</div></div></div>
         </div>
         {% if record.purpose %}
           <div class="mt-4">
@@ -117,6 +115,27 @@
         </div>
       </div>
     </div>
+  </div>
+</section>
+
+<section class="card surface-card card-shadow border-0 mb-4">
+  <div class="card-body p-4 p-xl-5">
+    <div class="text-uppercase text-secondary small fw-semibold mb-2">Release Notes</div>
+    <form method="post" class="row g-3">
+      <input type="hidden" name="action" value="update_release_notes">
+      <div class="col-12 col-xl-6">
+        <label class="form-label fw-semibold" for="internal_release_notes">Internal Release Notes</label>
+        <textarea class="form-control" id="internal_release_notes" name="internal_release_notes" rows="6" placeholder="Internal implementation notes, rollout steps, or technical caveats.">{{ record.internal_release_notes or '' }}</textarea>
+      </div>
+      <div class="col-12 col-xl-6">
+        <label class="form-label fw-semibold" for="plain_english_release_notes">Plain English Release Notes</label>
+        <textarea class="form-control" id="plain_english_release_notes" name="plain_english_release_notes" rows="6" placeholder="Short release note summary for humans.">{{ record.plain_english_release_notes or '' }}</textarea>
+      </div>
+      <div class="col-12 d-flex flex-wrap gap-2">
+        <button class="btn btn-primary" type="submit">Save Release Notes</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('sprint_detail', sprint_id=record.id) }}">Reset</a>
+      </div>
+    </form>
   </div>
 </section>
 
