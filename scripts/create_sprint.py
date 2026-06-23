@@ -33,7 +33,6 @@ def _build_preview(args: argparse.Namespace) -> dict[str, object]:
     sprint_group_name = args.title.strip()
     purpose = (args.purpose or "").strip()
     recommended_first_step = (args.recommended_first_step or "").strip()
-    sprint_code = viewer_app._generate_sprint_code(app_product)
     group = {
         "app_product": app_product,
         "sprint_group_name": sprint_group_name,
@@ -47,10 +46,7 @@ def _build_preview(args: argparse.Namespace) -> dict[str, object]:
         "purpose": purpose or f"Turn {app_product} ideas into a focused sprint.",
         "starting_prompt": "",
         "thoughts": thoughts,
-        "sprint_code": sprint_code,
-        "intended_sprint_code": sprint_code,
     }
-    group["starting_prompt"] = viewer_app._build_codex_prompt(app_product, sprint_group_name, thoughts, sprint_code, group["purpose"])
     return {
         "plain_summary": f"{len(thoughts)} source idea(s) prepared for sprint creation.",
         "sprint_groups": [group],
