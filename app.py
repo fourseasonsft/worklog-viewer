@@ -2704,6 +2704,7 @@ def _validation_session_trace_snapshot(record: dict[str, object]) -> dict[str, o
         "item_count": len(items),
         "counts": dict(validation_session_store.session_status_counts(record)),
         "first_statuses": [str(item.get("status") or "pending") for item in items[:5]],
+        "first_ids": [str(item.get("id") or "") for item in items[:10]],
     }
 
 
@@ -4515,6 +4516,50 @@ def validation_session_detail(session_slug: str):
     record_path, record = _validation_session_record_by_slug(session_slug)
     if not record_path or not record:
         abort(404)
+    def render_detail(
+        current_record: dict[str, object],
+        *,
+        handoff_path_value: str | None = None,
+        handoff_markdown_value: str | None = None,
+    ):
+        items = list(current_record.get("items") or [])
+        sections: list[dict[str, object]] = []
+        seen_sections: list[str] = []
+        for item in items:
+            section = str(item.get("section") or "Section").strip() or "Section"
+            if section not in seen_sections:
+                seen_sections.append(section)
+                sections.append({"section": section, "items": []})
+            for bucket in sections:
+                if bucket["section"] == section:
+                    bucket["items"].append(item)
+                    break
+        resolved_handoff_path = (
+            handoff_path_value
+            if handoff_path_value is not None
+            else str(current_record.get("handoff_path") or "").strip()
+        )
+        if handoff_markdown_value is not None:
+            resolved_handoff_markdown = handoff_markdown_value
+        else:
+            resolved_handoff_markdown = ""
+            if resolved_handoff_path:
+                handoff_file = WORKLOG_ROOT / resolved_handoff_path
+                if handoff_file.exists():
+                    resolved_handoff_markdown = handoff_file.read_text(encoding="utf-8")
+        return render_template(
+            "validation_session_detail.html",
+            title=current_record.get("title") or "Validation Session",
+            record=current_record,
+            sections=sections,
+            status_counts=validation_session_store.session_status_counts(current_record),
+            handoff_path=resolved_handoff_path,
+            handoff_markdown=resolved_handoff_markdown,
+            ai_prompt=validation_session_store.generate_ai_prompt(current_record, resolved_handoff_markdown)
+            if resolved_handoff_markdown
+            else "",
+        )
+
     if request.method == "POST":
         action = _validation_session_request_value("action").lower()
         if action == "save_item":
@@ -4524,11 +4569,13 @@ def validation_session_detail(session_slug: str):
             record = _validation_session_apply_form(record, request.form, item_id=item_id)
             validation_session_store.write_session(record_path, record)
             flash("Validation item saved.", "success")
-        elif action == "save_all":
+            return redirect(url_for("validation_session_detail", session_slug=record.get("slug") or session_slug))
+        if action == "save_all":
             record = _validation_session_apply_form(record, request.form)
             validation_session_store.write_session(record_path, record)
             flash("Validation session saved.", "success")
-        elif action == "set_status":
+            return redirect(url_for("validation_session_detail", session_slug=record.get("slug") or session_slug))
+        if action == "set_status":
             target_status = _validation_session_request_value("target_status")
             if target_status not in validation_session_store.ALLOWED_SESSION_STATUSES:
                 abort(400)
@@ -4542,12 +4589,9 @@ def validation_session_detail(session_slug: str):
             record = _validation_session_apply_form(record, request.form)
             validation_session_store.write_session(record_path, record)
             flash(f"Validation session marked {target_status.replace('_', ' ')}.", "success")
-        elif action == "generate_handoff":
+            return redirect(url_for("validation_session_detail", session_slug=record.get("slug") or session_slug))
+        if action == "generate_handoff":
             record = _validation_session_apply_form(record, request.form)
-            validation_session_store.write_session(record_path, record)
-            record_path, refreshed_record = _validation_session_record_by_slug(session_slug)
-            if refreshed_record:
-                record = refreshed_record
             include_notes = _validation_session_form_flag(request.form, "include_notes", True)
             include_passed = _validation_session_form_flag(request.form, "include_passed", True)
             include_pending = _validation_session_form_flag(request.form, "include_pending", True)
@@ -4557,89 +4601,55 @@ def validation_session_detail(session_slug: str):
             handoff_dir = validation_session_store.handoff_dir(WORKLOG_ROOT)
             handoff_dir.mkdir(parents=True, exist_ok=True)
             output = handoff_dir / f"{record.get('slug') or session_slug}.md"
-            record["_path"] = str(record_path)
-            app.logger.info(
-                "validation_session_handoff_trace before_generate %s",
-                _validation_session_trace_snapshot(record),
-            )
-            handoff_md = validation_session_store.generate_handoff_markdown(
-                record,
-                session_path_value=record_path,
-                include_notes=include_notes,
-                include_passed=include_passed,
-                include_pending=include_pending,
-                include_blocked=include_blocked,
-                include_na=include_na,
-                include_finding_summaries=include_finding_summaries,
-            )
-            output.write_text(handoff_md, encoding="utf-8")
-            record["handoff_path"] = str(output.relative_to(WORKLOG_ROOT))
-            record["updated_at"] = validation_session_store.now_iso()
-            validation_session_store.write_session(record_path, record)
-            record["_path"] = str(record_path)
-            _, persisted_record = _validation_session_record_by_slug(session_slug)
-            if persisted_record:
-                record = persisted_record
-            app.logger.info(
-                "validation_session_handoff_trace after_write %s",
-                {
-                    "path": str(record_path),
-                    "handoff_path": str(output.relative_to(WORKLOG_ROOT)),
-                    "generated_counts": dict(validation_session_store.session_status_counts(record)),
-                    "preview_counts": dict(validation_session_store.session_status_counts(record)),
-                    "first_statuses": [str(item.get("status") or "pending") for item in list(record.get("items") or [])[:5]],
-                },
-            )
-            if request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.args.get("format") == "json":
-                handoff_md = output.read_text(encoding="utf-8")
-                prompt_text = validation_session_store.generate_ai_prompt(record, handoff_md)
-                return jsonify(
-                    {
-                        "ok": True,
-                        "handoff_path": record["handoff_path"],
-                        "handoff_markdown": handoff_md,
-                        "ai_prompt": prompt_text,
-                        "include_notes": include_notes,
-                        "include_passed": include_passed,
-                        "include_pending": include_pending,
-                        "include_blocked": include_blocked,
-                        "include_na": include_na,
-                        "include_finding_summaries": include_finding_summaries,
-                    }
+            try:
+                handoff_md = validation_session_store.generate_handoff_markdown(
+                    record,
+                    session_path_value=record_path,
+                    include_notes=include_notes,
+                    include_passed=include_passed,
+                    include_pending=include_pending,
+                    include_blocked=include_blocked,
+                    include_na=include_na,
+                    include_finding_summaries=include_finding_summaries,
                 )
-            flash("ChatGPT handoff generated.", "success")
-        else:
-            abort(400)
-        return redirect(url_for("validation_session_detail", session_slug=record.get("slug") or session_slug))
-    handoff_path = str(record.get("handoff_path") or "").strip()
-    handoff_markdown = ""
-    if handoff_path:
-        handoff_file = WORKLOG_ROOT / handoff_path
-        if handoff_file.exists():
-            handoff_markdown = handoff_file.read_text(encoding="utf-8")
-    items = list(record.get("items") or [])
-    sections: list[dict[str, object]] = []
-    seen_sections: list[str] = []
-    for item in items:
-        section = str(item.get("section") or "Section").strip() or "Section"
-        if section not in seen_sections:
-            seen_sections.append(section)
-            sections.append({"section": section, "items": []})
-        for bucket in sections:
-            if bucket["section"] == section:
-                bucket["items"].append(item)
-                break
-    counts = validation_session_store.session_status_counts(record)
-    return render_template(
-        "validation_session_detail.html",
-        title=record.get("title") or "Validation Session",
-        record=record,
-        sections=sections,
-        status_counts=counts,
-        handoff_path=handoff_path,
-        handoff_markdown=handoff_markdown,
-        ai_prompt=validation_session_store.generate_ai_prompt(record, handoff_markdown) if handoff_markdown else "",
-    )
+                output.write_text(handoff_md, encoding="utf-8")
+                written_handoff = output.read_text(encoding="utf-8")
+                if written_handoff != handoff_md:
+                    raise IOError("Validation handoff readback did not match written content.")
+                record["handoff_path"] = str(output.relative_to(WORKLOG_ROOT))
+                record["updated_at"] = validation_session_store.now_iso()
+                validation_session_store.write_session(record_path, record)
+                record_path, persisted_record = _validation_session_record_by_slug(session_slug)
+                if persisted_record:
+                    record = persisted_record
+                if request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.args.get("format") == "json":
+                    prompt_text = validation_session_store.generate_ai_prompt(record, written_handoff)
+                    return jsonify(
+                        {
+                            "ok": True,
+                            "handoff_path": record["handoff_path"],
+                            "handoff_markdown": written_handoff,
+                            "ai_prompt": prompt_text,
+                            "include_notes": include_notes,
+                            "include_passed": include_passed,
+                            "include_pending": include_pending,
+                            "include_blocked": include_blocked,
+                            "include_na": include_na,
+                            "include_finding_summaries": include_finding_summaries,
+                        }
+                    )
+                flash("ChatGPT handoff generated.", "success")
+                return render_detail(record, handoff_path_value=str(record.get("handoff_path") or ""), handoff_markdown_value=written_handoff)
+            except (OSError, IOError, PermissionError) as exc:
+                app.logger.exception(
+                    "validation_session_handoff_write_failed path=%s handoff_path=%s",
+                    record_path,
+                    output,
+                )
+                flash(f"Failed to generate validation handoff: {exc}", "warning")
+                return render_detail(record, handoff_path_value="", handoff_markdown_value="")
+        abort(400)
+    return render_detail(record)
 
 
 @app.route("/api/assistant/thoughts")

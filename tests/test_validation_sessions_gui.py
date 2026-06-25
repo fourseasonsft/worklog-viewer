@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import app as viewer_app
 import validation_session_lib as validation_sessions
@@ -180,6 +181,11 @@ class ValidationSessionGuiTests(unittest.TestCase):
         self.assertIn("validation-sessions/ims-warehouse-foundation-release-1-0-validation.md", text)
         self.assertIn("Validation Session Handoff", text)
         self.assertIn("Analyze the following Operational Validation Session.", text)
+        self.assertIn("Pass Count: 3", text)
+        self.assertIn("Fail Count: 1", text)
+        self.assertIn("Pending Count: 3", text)
+        self.assertIn("Notes:", text)
+        self.assertIn("Break Bulk Intake Wizard save fails with HTTP 400.", text)
 
     def test_validation_session_generate_handoff_json_and_prompt(self) -> None:
         response = self._client().post(
@@ -316,6 +322,27 @@ class ValidationSessionGuiTests(unittest.TestCase):
         self.assertIn("HANDOFF_REFRESH_TEST_123", payload["handoff_markdown"])
         self.assertIn("Session Status: blocked", payload["handoff_markdown"])
         self.assertIn("Resolve the intake wizard save issue.", (self.root / "07-validation-sessions/ims-warehouse-foundation-release-1-0-validation.md").read_text(encoding="utf-8"))
+
+    def test_validation_session_generate_handoff_write_failure_shows_error(self) -> None:
+        with mock.patch("pathlib.Path.write_text", side_effect=OSError("disk full")):
+            response = self._client().post(
+                "/validation-sessions/ims-warehouse-foundation-release-1-0-validation",
+                data={
+                    "action": "generate_handoff",
+                    "include_notes": "1",
+                    "include_passed": "1",
+                    "include_pending": "1",
+                    "include_blocked": "1",
+                    "include_na": "1",
+                    "include_finding_summaries": "1",
+                },
+                follow_redirects=True,
+            )
+        self.assertEqual(response.status_code, 200)
+        text = response.get_data(as_text=True)
+        self.assertIn("Failed to generate validation handoff: disk full", text)
+        self.assertIn("Not recorded yet", text)
+        self.assertNotIn("Validation Session Handoff", text)
 
     def test_validation_session_mark_completed(self) -> None:
         response = self._client().post(
