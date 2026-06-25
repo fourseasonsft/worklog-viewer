@@ -361,8 +361,6 @@ def generate_handoff_markdown(
     include_na: bool = True,
     include_finding_summaries: bool = True,
 ) -> str:
-    counts = session_status_counts(data)
-    findings = findings_by_severity(data)
     items = list(data.get("items") or [])
     included_items = [
         item
@@ -375,6 +373,12 @@ def generate_handoff_markdown(
             include_na=include_na,
         )
     ]
+    counts = Counter(str(item.get("status") or "pending") for item in included_items)
+    findings = Counter()
+    for item in included_items:
+        severity = str(item.get("finding_severity") or "").strip()
+        if severity:
+            findings[severity] += 1
     failed = [item for item in included_items if str(item.get("status") or "") == "fail"]
     blocked = [item for item in included_items if str(item.get("status") or "") == "blocked"]
     deferred = [item for item in included_items if str(item.get("status") or "") in {"pending", "not_applicable"}]
