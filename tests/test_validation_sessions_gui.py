@@ -249,6 +249,37 @@ class ValidationSessionGuiTests(unittest.TestCase):
         self.assertIn("Pass Count:", handoff_text)
         self.assertIn("(none)", handoff_text)
 
+    def test_validation_session_generate_handoff_reflects_current_session_counts(self) -> None:
+        session_path = self.root / "07-validation-sessions/ims-warehouse-foundation-release-1-0-validation.md"
+        _, data = validation_sessions.read_session(self.root, "07-validation-sessions/ims-warehouse-foundation-release-1-0-validation.md")
+        for item in data["items"]:
+            if item["id"] != "break-bulk-intake-wizard":
+                item["status"] = "pass"
+                item["notes"] = item.get("notes") or "Validated in DEV."
+        validation_sessions.write_session(session_path, data)
+        response = self._client().post(
+            "/validation-sessions/ims-warehouse-foundation-release-1-0-validation?format=json",
+            data={
+                "action": "generate_handoff",
+                "include_notes": "1",
+                "include_passed": "1",
+                "include_pending": "1",
+                "include_blocked": "1",
+                "include_na": "1",
+                "include_finding_summaries": "1",
+            },
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        handoff_text = (self.root / payload["handoff_path"]).read_text(encoding="utf-8")
+        self.assertIn("Pass Count: 6", handoff_text)
+        self.assertIn("Fail Count: 1", handoff_text)
+        self.assertIn("Pending Count: 0", handoff_text)
+        self.assertIn("Notes:", handoff_text)
+        self.assertIn("Validated in DEV.", handoff_text)
+        self.assertIn("Break Bulk Intake Wizard save fails with HTTP 400.", handoff_text)
+
     def test_validation_session_generate_handoff_uses_latest_form_values(self) -> None:
         response = self._client().post(
             "/validation-sessions/ims-warehouse-foundation-release-1-0-validation?format=json",

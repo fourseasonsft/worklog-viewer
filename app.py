@@ -2696,6 +2696,17 @@ def _validation_session_request_value(name: str, default: str = "") -> str:
     return (request.form.get(name) or request.args.get(name) or default).strip()
 
 
+def _validation_session_trace_snapshot(record: dict[str, object]) -> dict[str, object]:
+    items = list(record.get("items") or [])
+    return {
+        "path": str(record.get("_path") or ""),
+        "updated_at": str(record.get("updated_at") or ""),
+        "item_count": len(items),
+        "counts": dict(validation_session_store.session_status_counts(record)),
+        "first_statuses": [str(item.get("status") or "pending") for item in items[:5]],
+    }
+
+
 def _sprint_records() -> list[dict[str, object]]:
     _ensure_sprint_dirs()
     records = []
@@ -4534,7 +4545,7 @@ def validation_session_detail(session_slug: str):
         elif action == "generate_handoff":
             record = _validation_session_apply_form(record, request.form)
             validation_session_store.write_session(record_path, record)
-            _, refreshed_record = _validation_session_record_by_slug(session_slug)
+            record_path, refreshed_record = _validation_session_record_by_slug(session_slug)
             if refreshed_record:
                 record = refreshed_record
             include_notes = _validation_session_form_flag(request.form, "include_notes", True)
@@ -4546,6 +4557,11 @@ def validation_session_detail(session_slug: str):
             handoff_dir = validation_session_store.handoff_dir(WORKLOG_ROOT)
             handoff_dir.mkdir(parents=True, exist_ok=True)
             output = handoff_dir / f"{record.get('slug') or session_slug}.md"
+            record["_path"] = str(record_path)
+            app.logger.info(
+                "validation_session_handoff_trace before_generate %s",
+                _validation_session_trace_snapshot(record),
+            )
             handoff_md = validation_session_store.generate_handoff_markdown(
                 record,
                 session_path_value=record_path,
@@ -4560,7 +4576,22 @@ def validation_session_detail(session_slug: str):
             record["handoff_path"] = str(output.relative_to(WORKLOG_ROOT))
             record["updated_at"] = validation_session_store.now_iso()
             validation_session_store.write_session(record_path, record)
+            record["_path"] = str(record_path)
+            _, persisted_record = _validation_session_record_by_slug(session_slug)
+            if persisted_record:
+                record = persisted_record
+            app.logger.info(
+                "validation_session_handoff_trace after_write %s",
+                {
+                    "path": str(record_path),
+                    "handoff_path": str(output.relative_to(WORKLOG_ROOT)),
+                    "generated_counts": dict(validation_session_store.session_status_counts(record)),
+                    "preview_counts": dict(validation_session_store.session_status_counts(record)),
+                    "first_statuses": [str(item.get("status") or "pending") for item in list(record.get("items") or [])[:5]],
+                },
+            )
             if request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.args.get("format") == "json":
+                handoff_md = output.read_text(encoding="utf-8")
                 prompt_text = validation_session_store.generate_ai_prompt(record, handoff_md)
                 return jsonify(
                     {
