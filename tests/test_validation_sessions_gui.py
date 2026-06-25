@@ -78,6 +78,11 @@ class ValidationSessionGuiTests(unittest.TestCase):
         self.assertIn("Include blocked items", html)
         self.assertIn("Include N/A items", html)
         self.assertIn("Include finding summaries", html)
+        self.assertEqual(html.count('<form method="post" id="validation-session-form">'), 1)
+        self.assertIn('type="submit" name="action" value="save_all"', html)
+        self.assertIn('type="submit" name="action" value="generate_handoff"', html)
+        self.assertIn('type="submit" name="action" value="save_item"', html)
+        self.assertNotIn('<form method="post"><form', html)
 
     def test_validation_session_save_item_updates_fields(self) -> None:
         response = self._client().post(

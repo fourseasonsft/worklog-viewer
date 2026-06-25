@@ -2692,6 +2692,10 @@ def _validation_session_form_flag(form: dict[str, str], key: str, default: bool 
     return str(value).strip().lower() in {"1", "true", "yes", "on", "checked"}
 
 
+def _validation_session_request_value(name: str, default: str = "") -> str:
+    return (request.form.get(name) or request.args.get(name) or default).strip()
+
+
 def _sprint_records() -> list[dict[str, object]]:
     _ensure_sprint_dirs()
     records = []
@@ -4501,9 +4505,9 @@ def validation_session_detail(session_slug: str):
     if not record_path or not record:
         abort(404)
     if request.method == "POST":
-        action = (request.form.get("action") or "").strip().lower()
+        action = _validation_session_request_value("action").lower()
         if action == "save_item":
-            item_id = (request.form.get("item_id") or "").strip()
+            item_id = _validation_session_request_value("item_id")
             if not item_id:
                 abort(400)
             record = _validation_session_apply_form(record, request.form, item_id=item_id)
@@ -4514,7 +4518,7 @@ def validation_session_detail(session_slug: str):
             validation_session_store.write_session(record_path, record)
             flash("Validation session saved.", "success")
         elif action == "set_status":
-            target_status = (request.form.get("target_status") or "").strip()
+            target_status = _validation_session_request_value("target_status")
             if target_status not in validation_session_store.ALLOWED_SESSION_STATUSES:
                 abort(400)
             record["status"] = target_status

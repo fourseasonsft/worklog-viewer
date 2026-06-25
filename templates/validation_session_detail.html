@@ -11,7 +11,7 @@
       <div class="d-flex flex-wrap gap-2">
         <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('validation_sessions') }}">Back to Validation Sessions</a>
         <a class="btn btn-outline-primary btn-sm" href="{{ url_for('sprints') }}">Sprint Queue</a>
-        <button class="btn btn-primary btn-sm" type="button" id="validation-generate-handoff">Generate Handoff</button>
+        <button class="btn btn-primary btn-sm" type="submit" name="action" value="generate_handoff" formaction="{{ url_for('validation_session_detail', session_slug=record.slug) }}?action=generate_handoff" id="validation-generate-handoff">Generate Handoff</button>
         <button class="btn btn-outline-primary btn-sm" type="button" id="validation-copy-handoff">📋 Copy Handoff</button>
         <button class="btn btn-outline-dark btn-sm" type="button" id="validation-copy-ai-prompt">🤖 Copy AI Prompt</button>
       </div>
@@ -69,10 +69,10 @@
             </div>
           </div>
           <div class="d-flex flex-wrap gap-2 mt-3">
-            <button class="btn btn-outline-primary" type="button" data-session-status="in_progress">Mark In Progress</button>
-            <button class="btn btn-outline-warning" type="button" data-session-status="blocked">Mark Blocked</button>
-            <button class="btn btn-outline-success" type="button" data-session-status="completed">Mark Completed</button>
-            <button class="btn btn-primary" type="button" id="validation-save-all">Save All</button>
+            <button class="btn btn-outline-primary" type="submit" name="action" value="set_status" formaction="{{ url_for('validation_session_detail', session_slug=record.slug) }}?action=set_status&target_status=in_progress">Mark In Progress</button>
+            <button class="btn btn-outline-warning" type="submit" name="action" value="set_status" formaction="{{ url_for('validation_session_detail', session_slug=record.slug) }}?action=set_status&target_status=blocked">Mark Blocked</button>
+            <button class="btn btn-outline-success" type="submit" name="action" value="set_status" formaction="{{ url_for('validation_session_detail', session_slug=record.slug) }}?action=set_status&target_status=completed">Mark Completed</button>
+            <button class="btn btn-primary" type="submit" name="action" value="save_all" formaction="{{ url_for('validation_session_detail', session_slug=record.slug) }}?action=save_all" id="validation-save-all">Save All</button>
           </div>
         </div>
       </div>
@@ -91,7 +91,7 @@
             <div class="col-6 col-lg-4"><div class="form-check"><input class="form-check-input" type="checkbox" id="handoff_include_findings" checked><label class="form-check-label" for="handoff_include_findings">Include finding summaries</label></div></div>
           </div>
           <div class="d-flex flex-wrap gap-2">
-            <button class="btn btn-outline-primary" type="button" id="validation-generate-handoff-secondary">Generate Handoff</button>
+            <button class="btn btn-outline-primary" type="submit" name="action" value="generate_handoff" formaction="{{ url_for('validation_session_detail', session_slug=record.slug) }}?action=generate_handoff" id="validation-generate-handoff-secondary">Generate Handoff</button>
           </div>
           <div id="validation-handoff-message" class="alert d-none mt-3" role="alert"></div>
           <div class="mt-3">
@@ -128,7 +128,7 @@
                     <div class="fw-semibold mb-2">{{ item.description }}</div>
                     <div class="text-secondary small">{{ item.id }}</div>
                   </div>
-                  <button class="btn btn-outline-secondary btn-sm align-self-start" type="button" data-save-item="{{ item.id }}">Save Item</button>
+                  <button class="btn btn-outline-secondary btn-sm align-self-start" type="submit" name="action" value="save_item" formaction="{{ url_for('validation_session_detail', session_slug=record.slug) }}?action=save_item&item_id={{ item.id|urlencode }}">Save Item</button>
                 </div>
 
                 <div class="mt-3">
@@ -218,12 +218,6 @@
     const includeFindings = document.getElementById('handoff_include_findings');
     if (!form || !action || !itemId || !targetStatus) return;
     const copyModalInstance = copyModal ? bootstrap.Modal.getOrCreateInstance(copyModal) : null;
-    const submitAction = (value, options = {}) => {
-      action.value = value;
-      itemId.value = options.itemId || '';
-      targetStatus.value = options.targetStatus || '';
-      form.submit();
-    };
     const getHandoffOptions = () => ({
       include_notes: includeNotes?.checked ?? true,
       include_passed: includePassed?.checked ?? true,
@@ -295,17 +289,6 @@
       handoffText.trim(),
       '',
     ].join('\n');
-    document.querySelectorAll('[data-save-item]').forEach((button) => {
-      button.addEventListener('click', () => submitAction('save_item', {itemId: button.getAttribute('data-save-item') || ''}));
-    });
-    const saveAll = () => submitAction('save_all');
-    if (saveAllTop) saveAllTop.addEventListener('click', saveAll);
-    const generateHandoff = () => submitAction('generate_handoff');
-    if (handoffPrimary) handoffPrimary.addEventListener('click', generateHandoff);
-    if (handoffSecondary) handoffSecondary.addEventListener('click', generateHandoff);
-    document.querySelectorAll('[data-session-status]').forEach((button) => {
-      button.addEventListener('click', () => submitAction('set_status', {targetStatus: button.getAttribute('data-session-status') || ''}));
-    });
     document.querySelectorAll('.validation-status-radio').forEach((radio) => {
       radio.addEventListener('change', () => {
         const targetId = radio.getAttribute('data-status-target');
