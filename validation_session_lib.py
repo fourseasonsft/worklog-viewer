@@ -327,13 +327,57 @@ def findings_by_severity(data: dict[str, object]) -> Counter[str]:
     return counter
 
 
-def generate_handoff_markdown(data: dict[str, object], session_path_value: Path | None = None) -> str:
+def _status_label(status: str) -> str:
+    mapping = {
+        "pass": "PASS",
+        "fail": "FAIL",
+        "pending": "PENDING",
+        "blocked": "BLOCKED",
+        "not_applicable": "N/A",
+    }
+    return mapping.get(status, status.upper() or "PENDING")
+
+
+def _item_should_include(status: str, *, include_passed: bool, include_pending: bool, include_blocked: bool, include_na: bool) -> bool:
+    if status == "pass":
+        return include_passed
+    if status == "pending":
+        return include_pending
+    if status == "blocked":
+        return include_blocked
+    if status == "not_applicable":
+        return include_na
+    return True
+
+
+def generate_handoff_markdown(
+    data: dict[str, object],
+    session_path_value: Path | None = None,
+    *,
+    include_notes: bool = True,
+    include_passed: bool = True,
+    include_pending: bool = True,
+    include_blocked: bool = True,
+    include_na: bool = True,
+    include_finding_summaries: bool = True,
+) -> str:
     counts = session_status_counts(data)
     findings = findings_by_severity(data)
     items = list(data.get("items") or [])
-    failed = [item for item in items if str(item.get("status") or "") == "fail"]
-    blocked = [item for item in items if str(item.get("status") or "") == "blocked"]
-    deferred = [item for item in items if str(item.get("status") or "") in {"pending", "not_applicable"}]
+    included_items = [
+        item
+        for item in items
+        if _item_should_include(
+            str(item.get("status") or "pending"),
+            include_passed=include_passed,
+            include_pending=include_pending,
+            include_blocked=include_blocked,
+            include_na=include_na,
+        )
+    ]
+    failed = [item for item in included_items if str(item.get("status") or "") == "fail"]
+    blocked = [item for item in included_items if str(item.get("status") or "") == "blocked"]
+    deferred = [item for item in included_items if str(item.get("status") or "") in {"pending", "not_applicable"}]
     recommended = "Review failed items and resolve the blocker before the next validation pass."
     if blocked:
         recommended = "Unblock the blocked items before retesting the session."
@@ -341,6 +385,13 @@ def generate_handoff_markdown(data: dict[str, object], session_path_value: Path 
         recommended = "Work through the remaining pending items and collect findings."
     elif not failed and not blocked and not counts.get("pending"):
         recommended = "Mark the session completed and move the validation results into the next handoff."
+    release_recommendation = "Not recorded yet"
+    if counts.get("fail") or counts.get("blocked"):
+        release_recommendation = "Do not ship until the failure or blocker is resolved."
+    elif counts.get("pending"):
+        release_recommendation = "Continue validation before recommending release."
+    else:
+        release_recommendation = "Ready for release consideration after review."
     lines = [
         f"# Validation Session Handoff: {data.get('title') or 'Validation Session'}",
         "",
@@ -355,6 +406,7 @@ def generate_handoff_markdown(data: dict[str, object], session_path_value: Path 
         f"- Fail Count: {counts.get('fail', 0)}",
         f"- Blocked Count: {counts.get('blocked', 0)}",
         f"- Pending Count: {counts.get('pending', 0)}",
+        f"- N/A Count: {counts.get('not_applicable', 0)}",
         "",
         "## Findings by Severity",
     ]
@@ -363,36 +415,55 @@ def generate_handoff_markdown(data: dict[str, object], session_path_value: Path 
             lines.append(f"- {severity}: {count}")
     else:
         lines.append("- None recorded yet")
-    lines.extend(["", "## Failed Items"])
-    if failed:
-        for item in failed:
-            lines.append(
-                f"- {item.get('id')}: {item.get('section')} - {item.get('finding_summary') or item.get('description') or 'No summary recorded.'}"
-            )
+    lines.extend(["", "## Validation Items"])
+    if included_items:
+        for item in included_items:
+            status = str(item.get("status") or "pending")
+            lines.append(f"### {item.get('section') or 'Section'}")
+            lines.append(f"- {('✔' if status == 'pass' else '✖' if status == 'fail' else '⚠' if status == 'blocked' else '•')} {item.get('description') or 'No description recorded.'}")
+            lines.append(f"- Status: {_status_label(status)}")
+            if include_notes:
+                lines.append("  - Notes:")
+                notes = str(item.get('notes') or '').strip() or 'Not recorded yet'
+                for line in notes.splitlines():
+                    lines.append(f"    {line}")
+            if status in {"fail", "blocked"} or include_finding_summaries:
+                lines.append(f"- Finding Severity: {item.get('finding_severity') or 'Not recorded yet'}")
+                lines.append(f"- Finding Summary: {item.get('finding_summary') or 'Not recorded yet'}")
+            lines.append("")
     else:
         lines.append("- None")
-    lines.append("")
-    lines.append("## Blocked Items")
-    if blocked:
-        for item in blocked:
-            lines.append(f"- {item.get('id')}: {item.get('section')} - {item.get('finding_summary') or 'No summary recorded.'}")
-    else:
-        lines.append("- None")
-    lines.append("")
-    lines.append("## Deferred Items")
-    if deferred:
-        for item in deferred:
-            lines.append(f"- {item.get('id')}: {item.get('section')} - {item.get('description') or 'No description recorded.'}")
-    else:
-        lines.append("- None")
-    lines.extend(["", "## Recommended Next Action", recommended])
+    lines.extend(["", "## Release Recommendation", release_recommendation, "", "## Recommended Next Action", recommended])
     if session_path_value:
         lines.extend(["", f"- Session File: {session_path_value}"])
     return "\n".join(lines).rstrip() + "\n"
+
+
+def generate_ai_prompt(data: dict[str, object], handoff_text: str) -> str:
+    return "\n".join(
+        [
+            "Analyze the following Operational Validation Session.",
+            "",
+            "Please:",
+            "",
+            "• Summarize the findings.",
+            "• Identify probable root causes.",
+            "• Group related issues.",
+            "• Recommend implementation order.",
+            "• Identify technical debt.",
+            "• Identify regression risks.",
+            "• Recommend release readiness.",
+            "• Produce a prioritized implementation plan.",
+            "",
+            "=== VALIDATION HANDOFF ===",
+            "",
+            handoff_text.rstrip(),
+            "",
+        ]
+    )
 
 
 def seed_profile_or_error(profile: str | None) -> dict[str, object]:
     if profile and profile.strip().lower() != SEED_PROFILE:
         raise ValueError(f"Unknown seed profile: {profile}")
     return seed_session_payload()
-

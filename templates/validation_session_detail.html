@@ -11,7 +11,9 @@
       <div class="d-flex flex-wrap gap-2">
         <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('validation_sessions') }}">Back to Validation Sessions</a>
         <a class="btn btn-outline-primary btn-sm" href="{{ url_for('sprints') }}">Sprint Queue</a>
-        <button class="btn btn-primary btn-sm" type="button" id="validation-generate-handoff">Generate ChatGPT Handoff</button>
+        <button class="btn btn-primary btn-sm" type="button" id="validation-generate-handoff">Generate Handoff</button>
+        <button class="btn btn-outline-primary btn-sm" type="button" id="validation-copy-handoff">📋 Copy Handoff</button>
+        <button class="btn btn-outline-dark btn-sm" type="button" id="validation-copy-ai-prompt">🤖 Copy AI Prompt</button>
       </div>
     </div>
   </div>
@@ -80,17 +82,32 @@
         <div class="card-body p-4 p-xl-5">
           <div class="text-uppercase text-secondary small fw-semibold mb-2">Handoff</div>
           <p class="text-secondary small mb-3">Generate a ChatGPT handoff from the current session evidence without changing the session record format.</p>
-          <div class="d-flex flex-wrap gap-2">
-            <button class="btn btn-outline-primary" type="button" id="validation-generate-handoff-secondary">Generate ChatGPT Handoff</button>
+          <div class="row g-2 mb-3">
+            <div class="col-6 col-lg-4"><div class="form-check"><input class="form-check-input" type="checkbox" id="handoff_include_notes" checked><label class="form-check-label" for="handoff_include_notes">Include notes</label></div></div>
+            <div class="col-6 col-lg-4"><div class="form-check"><input class="form-check-input" type="checkbox" id="handoff_include_passed" checked><label class="form-check-label" for="handoff_include_passed">Include passed items</label></div></div>
+            <div class="col-6 col-lg-4"><div class="form-check"><input class="form-check-input" type="checkbox" id="handoff_include_pending" checked><label class="form-check-label" for="handoff_include_pending">Include pending items</label></div></div>
+            <div class="col-6 col-lg-4"><div class="form-check"><input class="form-check-input" type="checkbox" id="handoff_include_blocked" checked><label class="form-check-label" for="handoff_include_blocked">Include blocked items</label></div></div>
+            <div class="col-6 col-lg-4"><div class="form-check"><input class="form-check-input" type="checkbox" id="handoff_include_na" checked><label class="form-check-label" for="handoff_include_na">Include N/A items</label></div></div>
+            <div class="col-6 col-lg-4"><div class="form-check"><input class="form-check-input" type="checkbox" id="handoff_include_findings" checked><label class="form-check-label" for="handoff_include_findings">Include finding summaries</label></div></div>
           </div>
+          <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-outline-primary" type="button" id="validation-generate-handoff-secondary">Generate Handoff</button>
+          </div>
+          <div id="validation-handoff-message" class="alert d-none mt-3" role="alert"></div>
           <div class="mt-3">
             <div class="text-secondary small mb-1">Handoff Path</div>
-            <div class="fw-semibold">{{ handoff_path or 'Not recorded yet' }}</div>
+            <div class="fw-semibold" id="validation-handoff-path">{{ handoff_path or 'Not recorded yet' }}</div>
           </div>
           {% if handoff_markdown %}
             <div class="mt-3">
               <div class="text-secondary small mb-1">Generated Handoff</div>
               <pre class="assistant-pre">{{ handoff_markdown }}</pre>
+            </div>
+          {% endif %}
+          {% if ai_prompt %}
+            <div class="mt-3">
+              <div class="text-secondary small mb-1">AI Prompt Preview</div>
+              <pre class="assistant-pre">{{ ai_prompt }}</pre>
             </div>
           {% endif %}
         </div>
@@ -156,6 +173,27 @@
   {% endfor %}
 </form>
 
+<div class="modal fade" id="validation-copy-modal" tabindex="-1" aria-labelledby="validation-copy-modal-title" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <div class="text-uppercase text-secondary small fw-semibold mb-1">Validation Handoff</div>
+          <h2 class="modal-title h5 mb-0" id="validation-copy-modal-title">Copy validation output</h2>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-secondary small mb-3">If clipboard copy fails, select the text below and use Ctrl+C.</p>
+        <textarea class="form-control" id="validation-copy-modal-text" rows="18" spellcheck="false"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" type="button" id="validation-copy-modal-close" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
   (() => {
     const form = document.getElementById('validation-session-form');
@@ -165,21 +203,110 @@
     const saveAllTop = document.getElementById('validation-save-all');
     const handoffPrimary = document.getElementById('validation-generate-handoff');
     const handoffSecondary = document.getElementById('validation-generate-handoff-secondary');
+    const copyHandoff = document.getElementById('validation-copy-handoff');
+    const copyAiPrompt = document.getElementById('validation-copy-ai-prompt');
+    const copyModal = document.getElementById('validation-copy-modal');
+    const copyModalText = document.getElementById('validation-copy-modal-text');
+    const copyModalClose = document.getElementById('validation-copy-modal-close');
+    const handoffMessage = document.getElementById('validation-handoff-message');
+    const handoffPath = document.getElementById('validation-handoff-path');
+    const includeNotes = document.getElementById('handoff_include_notes');
+    const includePassed = document.getElementById('handoff_include_passed');
+    const includePending = document.getElementById('handoff_include_pending');
+    const includeBlocked = document.getElementById('handoff_include_blocked');
+    const includeNa = document.getElementById('handoff_include_na');
+    const includeFindings = document.getElementById('handoff_include_findings');
     if (!form || !action || !itemId || !targetStatus) return;
+    const copyModalInstance = copyModal ? bootstrap.Modal.getOrCreateInstance(copyModal) : null;
     const submitAction = (value, options = {}) => {
       action.value = value;
       itemId.value = options.itemId || '';
       targetStatus.value = options.targetStatus || '';
       form.submit();
     };
+    const getHandoffOptions = () => ({
+      include_notes: includeNotes?.checked ?? true,
+      include_passed: includePassed?.checked ?? true,
+      include_pending: includePending?.checked ?? true,
+      include_blocked: includeBlocked?.checked ?? true,
+      include_na: includeNa?.checked ?? true,
+      include_finding_summaries: includeFindings?.checked ?? true,
+    });
+    const requestHandoff = async () => {
+      if (handoffMessage) {
+        handoffMessage.classList.add('d-none');
+        handoffMessage.textContent = '';
+      }
+      const payload = new URLSearchParams({
+        action: 'generate_handoff',
+        ...Object.fromEntries(Object.entries(getHandoffOptions()).map(([key, value]) => [key, value ? '1' : '0'])),
+      });
+      const response = await fetch(window.location.pathname + '?format=json', {
+        method: 'POST',
+        headers: {'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/x-www-form-urlencoded'},
+        body: payload.toString(),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || 'Failed to generate validation handoff.');
+      }
+      if (handoffPath && data.handoff_path) {
+        handoffPath.textContent = data.handoff_path;
+      }
+      if (handoffMessage) {
+        handoffMessage.className = 'alert alert-success mt-3';
+        handoffMessage.textContent = `Handoff generated successfully.\nLocation:\n${data.handoff_path}`;
+        handoffMessage.classList.remove('d-none');
+      }
+      return data;
+    };
+    const showCopyFallback = (text) => {
+      if (!copyModalInstance || !copyModalText) return;
+      copyModalText.value = text;
+      copyModalInstance.show();
+      copyModalText.focus();
+      copyModalText.select();
+    };
+    const copyText = async (text, successMessage) => {
+      try {
+        await navigator.clipboard.writeText(text);
+        window.alert(successMessage);
+      } catch (error) {
+        showCopyFallback(text);
+        throw error;
+      }
+    };
+    const buildPrompt = (handoffText) => [
+      'Analyze the following Operational Validation Session.',
+      '',
+      'Please:',
+      '',
+      '• Summarize the findings.',
+      '• Identify probable root causes.',
+      '• Group related issues.',
+      '• Recommend implementation order.',
+      '• Identify technical debt.',
+      '• Identify regression risks.',
+      '• Recommend release readiness.',
+      '• Produce a prioritized implementation plan.',
+      '',
+      '=== VALIDATION HANDOFF ===',
+      '',
+      handoffText.trim(),
+      '',
+    ].join('\n');
     document.querySelectorAll('[data-save-item]').forEach((button) => {
       button.addEventListener('click', () => submitAction('save_item', {itemId: button.getAttribute('data-save-item') || ''}));
     });
     const saveAll = () => submitAction('save_all');
     if (saveAllTop) saveAllTop.addEventListener('click', saveAll);
-    const generateHandoff = () => submitAction('generate_handoff');
+    const generateHandoff = () => {
+      requestHandoff().catch(() => {});
+    };
     if (handoffPrimary) handoffPrimary.addEventListener('click', generateHandoff);
-    if (handoffSecondary) handoffSecondary.addEventListener('click', generateHandoff);
+    if (handoffSecondary) handoffSecondary.addEventListener('click', () => {
+      requestHandoff().catch(() => {});
+    });
     document.querySelectorAll('[data-session-status]').forEach((button) => {
       button.addEventListener('click', () => submitAction('set_status', {targetStatus: button.getAttribute('data-session-status') || ''}));
     });
@@ -192,6 +319,45 @@
         details.open = ['fail', 'blocked'].includes(radio.value);
       });
     });
+    const generateAndMaybeCopy = async (mode) => {
+      const response = await requestHandoff();
+      const text = mode === 'prompt' ? buildPrompt(response.handoff_markdown) : response.handoff_markdown;
+      if (mode === 'prompt') {
+        await copyText(text, '✅ ChatGPT prompt copied to clipboard.');
+      } else if (mode === 'handoff') {
+        await copyText(text, '✅ Validation handoff copied to clipboard.');
+      }
+      return response;
+    };
+    if (copyHandoff) {
+      copyHandoff.addEventListener('click', async () => {
+        try {
+          await generateAndMaybeCopy('handoff');
+        } catch (error) {
+          // Fallback modal already shown.
+        }
+      });
+    }
+    if (copyAiPrompt) {
+      copyAiPrompt.addEventListener('click', async () => {
+        try {
+          await generateAndMaybeCopy('prompt');
+        } catch (error) {
+          // Fallback modal already shown.
+        }
+      });
+    }
+    if (copyModalText) {
+      copyModalText.addEventListener('focus', () => copyModalText.select());
+      copyModalText.addEventListener('click', () => copyModalText.select());
+    }
+    if (copyModalClose) {
+      copyModalClose.addEventListener('click', () => {
+        if (copyModalText) {
+          copyModalText.value = '';
+        }
+      });
+    }
   })();
 </script>
 {% endblock %}

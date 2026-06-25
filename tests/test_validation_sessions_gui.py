@@ -69,7 +69,15 @@ class ValidationSessionGuiTests(unittest.TestCase):
         self.assertIn("N/A", html)
         self.assertIn('name="item_notes_break-bulk-intake-wizard"', html)
         self.assertIn("finding_details_break-bulk-intake-wizard", html)
-        self.assertIn("Generate ChatGPT Handoff", html)
+        self.assertIn("Generate Handoff", html)
+        self.assertIn("📋 Copy Handoff", html)
+        self.assertIn("🤖 Copy AI Prompt", html)
+        self.assertIn("Include notes", html)
+        self.assertIn("Include passed items", html)
+        self.assertIn("Include pending items", html)
+        self.assertIn("Include blocked items", html)
+        self.assertIn("Include N/A items", html)
+        self.assertIn("Include finding summaries", html)
 
     def test_validation_session_save_item_updates_fields(self) -> None:
         response = self._client().post(
@@ -142,6 +150,30 @@ class ValidationSessionGuiTests(unittest.TestCase):
         handoff_path = self.root / "05-sprint-handoffs/validation-sessions/ims-warehouse-foundation-release-1-0-validation.md"
         self.assertTrue(handoff_path.exists())
         self.assertIn("Validation Session Handoff", handoff_path.read_text(encoding="utf-8"))
+
+    def test_validation_session_generate_handoff_json_and_prompt(self) -> None:
+        response = self._client().post(
+            "/validation-sessions/ims-warehouse-foundation-release-1-0-validation?format=json",
+            data={
+                "action": "generate_handoff",
+                "include_notes": "1",
+                "include_passed": "1",
+                "include_pending": "1",
+                "include_blocked": "1",
+                "include_na": "1",
+                "include_finding_summaries": "1",
+            },
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("handoff_path", payload)
+        self.assertIn("Validation Session Handoff", payload["handoff_markdown"])
+        self.assertIn("Analyze the following Operational Validation Session.", payload["ai_prompt"])
+        self.assertIn("=== VALIDATION HANDOFF ===", payload["ai_prompt"])
+        self.assertIn("Internal Pallet IDs", payload["handoff_markdown"])
+        self.assertIn("Status: PASS", payload["handoff_markdown"])
 
     def test_validation_session_mark_completed(self) -> None:
         response = self._client().post(

@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import quote, urljoin
 from zoneinfo import ZoneInfo
 
-from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 import markdown
 import validation_session_lib as validation_session_store
@@ -2685,6 +2685,13 @@ def _validation_session_apply_form(data: dict[str, object], form: dict[str, str]
     return data
 
 
+def _validation_session_form_flag(form: dict[str, str], key: str, default: bool = True) -> bool:
+    value = form.get(key)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on", "checked"}
+
+
 def _sprint_records() -> list[dict[str, object]]:
     _ensure_sprint_dirs()
     records = []
@@ -4521,14 +4528,45 @@ def validation_session_detail(session_slug: str):
             validation_session_store.write_session(record_path, record)
             flash(f"Validation session marked {target_status.replace('_', ' ')}.", "success")
         elif action == "generate_handoff":
+            include_notes = _validation_session_form_flag(request.form, "include_notes", True)
+            include_passed = _validation_session_form_flag(request.form, "include_passed", True)
+            include_pending = _validation_session_form_flag(request.form, "include_pending", True)
+            include_blocked = _validation_session_form_flag(request.form, "include_blocked", True)
+            include_na = _validation_session_form_flag(request.form, "include_na", True)
+            include_finding_summaries = _validation_session_form_flag(request.form, "include_finding_summaries", True)
             handoff_dir = validation_session_store.handoff_dir(WORKLOG_ROOT)
             handoff_dir.mkdir(parents=True, exist_ok=True)
             output = handoff_dir / f"{record.get('slug') or session_slug}.md"
-            handoff_md = validation_session_store.generate_handoff_markdown(record, session_path_value=record_path)
+            handoff_md = validation_session_store.generate_handoff_markdown(
+                record,
+                session_path_value=record_path,
+                include_notes=include_notes,
+                include_passed=include_passed,
+                include_pending=include_pending,
+                include_blocked=include_blocked,
+                include_na=include_na,
+                include_finding_summaries=include_finding_summaries,
+            )
             output.write_text(handoff_md, encoding="utf-8")
             record["handoff_path"] = str(output.relative_to(WORKLOG_ROOT))
             record["updated_at"] = validation_session_store.now_iso()
             validation_session_store.write_session(record_path, record)
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.args.get("format") == "json":
+                prompt_text = validation_session_store.generate_ai_prompt(record, handoff_md)
+                return jsonify(
+                    {
+                        "ok": True,
+                        "handoff_path": record["handoff_path"],
+                        "handoff_markdown": handoff_md,
+                        "ai_prompt": prompt_text,
+                        "include_notes": include_notes,
+                        "include_passed": include_passed,
+                        "include_pending": include_pending,
+                        "include_blocked": include_blocked,
+                        "include_na": include_na,
+                        "include_finding_summaries": include_finding_summaries,
+                    }
+                )
             flash("ChatGPT handoff generated.", "success")
         else:
             abort(400)
@@ -4560,6 +4598,7 @@ def validation_session_detail(session_slug: str):
         status_counts=counts,
         handoff_path=handoff_path,
         handoff_markdown=handoff_markdown,
+        ai_prompt=validation_session_store.generate_ai_prompt(record, handoff_markdown) if handoff_markdown else "",
     )
 
 
