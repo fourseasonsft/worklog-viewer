@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card surface-card card-shadow border-0 mb-4">
+  <div class="card-body p-4 p-xl-5">
+    <div class="d-flex flex-column flex-xl-row justify-content-between gap-4 align-items-xl-start">
+      <div>
+        <div class="eyebrow text-uppercase text-secondary small fw-semibold mb-2">Operational Validation Sessions</div>
+        <h1 class="h2 mb-2">Validation sessions for release readiness and operational evidence</h1>
+        <p class="text-secondary mb-0">Use these structured session records to track findings, capture blockers, and generate a ChatGPT handoff for analysis.</p>
+      </div>
+      <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('dashboard') }}">Dashboard</a>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('sprints') }}">Sprint Queue</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="card surface-card card-shadow border-0">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table inbox-table align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>App</th>
+            <th>Run</th>
+            <th>Track</th>
+            <th>Release</th>
+            <th>Status</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if records %}
+            {% for record in records %}
+              <tr>
+                <td class="fw-semibold"><a href="{{ url_for('validation_session_detail', session_slug=record.slug) }}">{{ record.title }}</a></td>
+                <td>{{ record.app }}</td>
+                <td>{{ record.run }}</td>
+                <td>{{ record.track }}</td>
+                <td>{{ record.release }}</td>
+                <td><span class="badge {% if record.status == 'completed' %}text-bg-success{% elif record.status == 'blocked' %}text-bg-danger{% else %}text-bg-primary{% endif %}">{{ record.status.replace('_', ' ').title() }}</span></td>
+                <td class="text-nowrap">{{ record.updated_at | display_timestamp if record.updated_at else 'Not recorded yet' }}</td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="7" class="p-4 text-secondary">No validation sessions found.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card surface-card card-shadow border-0 mb-4">
+  <div class="card-body p-4 p-xl-5">
+    <div class="d-flex flex-column flex-xl-row justify-content-between gap-4 align-items-xl-start">
+      <div>
+        <div class="eyebrow text-uppercase text-secondary small fw-semibold mb-2">Validation Session</div>
+        <h1 class="h2 mb-2">{{ record.title }}</h1>
+        <p class="text-secondary mb-0">Fill out the pass / fail / notes workflow first, then use the advanced fields for findings and analysis.</p>
+      </div>
+      <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('validation_sessions') }}">Back to Validation Sessions</a>
+        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('sprints') }}">Sprint Queue</a>
+        <button class="btn btn-primary btn-sm" type="button" id="validation-generate-handoff">Generate ChatGPT Handoff</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<form method="post" id="validation-session-form">
+  <input type="hidden" name="action" id="validation-session-action" value="save_all">
+  <input type="hidden" name="item_id" id="validation-session-item-id" value="">
+  <input type="hidden" name="target_status" id="validation-session-target-status" value="">
+
+  <section class="row g-4 mb-4">
+    <div class="col-12 col-xl-7">
+      <div class="card surface-card card-shadow border-0 h-100">
+        <div class="card-body p-4 p-xl-5">
+          <div class="text-uppercase text-secondary small fw-semibold mb-2">Session Details</div>
+          <div class="row g-3">
+            <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">App</div><div class="fw-semibold">{{ record.app }}</div></div></div>
+            <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Run</div><div class="fw-semibold">{{ record.run }}</div></div></div>
+            <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Track</div><div class="fw-semibold">{{ record.track }}</div></div></div>
+            <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Release</div><div class="fw-semibold">{{ record.release }}</div></div></div>
+            <div class="col-12 col-md-6">
+              <label class="form-label fw-semibold" for="session_status">Session Status</label>
+              <select class="form-select" id="session_status" name="session_status">
+                <option value="in_progress" {% if record.status == 'in_progress' %}selected{% endif %}>In Progress</option>
+                <option value="blocked" {% if record.status == 'blocked' %}selected{% endif %}>Blocked</option>
+                <option value="completed" {% if record.status == 'completed' %}selected{% endif %}>Completed</option>
+              </select>
+            </div>
+            <div class="col-12 col-md-6"><div class="priority-card"><div class="text-secondary small text-uppercase fw-semibold">Updated</div><div class="fw-semibold">{{ record.updated_at | display_timestamp if record.updated_at else 'Not recorded yet' }}</div></div></div>
+            <div class="col-12">
+              <label class="form-label fw-semibold" for="final_recommendation">Final Recommendation</label>
+              <textarea class="form-control" id="final_recommendation" name="final_recommendation" rows="3" placeholder="Add a final recommendation for the handoff review.">{{ record.final_recommendation or '' }}</textarea>
+            </div>
+          </div>
+          <div class="d-flex flex-wrap gap-2 mt-3">
+            <button class="btn btn-outline-primary" type="button" data-session-status="in_progress">Mark In Progress</button>
+            <button class="btn btn-outline-warning" type="button" data-session-status="blocked">Mark Blocked</button>
+            <button class="btn btn-outline-success" type="button" data-session-status="completed">Mark Completed</button>
+            <button class="btn btn-primary" type="button" id="validation-save-all">Save All</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-xl-5">
+      <div class="card surface-card card-shadow border-0 h-100">
+        <div class="card-body p-4 p-xl-5">
+          <div class="text-uppercase text-secondary small fw-semibold mb-2">Handoff</div>
+          <p class="text-secondary small mb-3">Generate a ChatGPT handoff from the current session evidence without changing the session record format.</p>
+          <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-outline-primary" type="button" id="validation-generate-handoff-secondary">Generate ChatGPT Handoff</button>
+          </div>
+          <div class="mt-3">
+            <div class="text-secondary small mb-1">Handoff Path</div>
+            <div class="fw-semibold">{{ handoff_path or 'Not recorded yet' }}</div>
+          </div>
+          {% if handoff_markdown %}
+            <div class="mt-3">
+              <div class="text-secondary small mb-1">Generated Handoff</div>
+              <pre class="assistant-pre">{{ handoff_markdown }}</pre>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card surface-card card-shadow border-0 mb-4">
+    <div class="card-body p-4 p-xl-5">
+      <div class="d-flex flex-column flex-xl-row justify-content-between gap-3 align-items-xl-center mb-3">
+        <div>
+          <div class="text-uppercase text-secondary small fw-semibold mb-1">Items</div>
+          <h2 class="h4 mb-0">Fill pass / fail / notes first, then add findings</h2>
+        </div>
+        <button class="btn btn-primary" type="button" id="validation-save-all-bottom">Save All Items</button>
+      </div>
+
+      <div class="row g-3">
+        {% for item in record['items'] %}
+          <div class="col-12">
+            <div class="priority-card">
+              <div class="d-flex flex-column flex-xl-row justify-content-between gap-2 align-items-xl-start mb-3">
+                <div>
+                  <div class="text-uppercase text-secondary small fw-semibold mb-1">{{ item.section }}</div>
+                  <div class="fw-semibold">{{ item.description }}</div>
+                </div>
+                <button class="btn btn-outline-secondary btn-sm" type="button" data-save-item="{{ item.id }}">Save Item</button>
+              </div>
+              <div class="row g-3">
+                <div class="col-12 col-md-4">
+                  <label class="form-label fw-semibold" for="item_status_{{ item.id }}">Status</label>
+                  <select class="form-select" id="item_status_{{ item.id }}" name="item_status_{{ item.id }}">
+                    {% for value in ['pending', 'pass', 'fail', 'blocked', 'not_applicable'] %}
+                      <option value="{{ value }}" {% if item.status == value %}selected{% endif %}>{{ value.replace('_', ' ').title() }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="col-12 col-md-8">
+                  <label class="form-label fw-semibold" for="item_notes_{{ item.id }}">Notes</label>
+                  <textarea class="form-control" id="item_notes_{{ item.id }}" name="item_notes_{{ item.id }}" rows="2" placeholder="Simple pass/fail notes or blocker details.">{{ item.notes or '' }}</textarea>
+                </div>
+                <div class="col-12 col-md-4">
+                  <label class="form-label fw-semibold" for="item_finding_severity_{{ item.id }}">Finding Severity</label>
+                  <select class="form-select" id="item_finding_severity_{{ item.id }}" name="item_finding_severity_{{ item.id }}">
+                    <option value="" {% if not item.finding_severity %}selected{% endif %}>Blank</option>
+                    {% for value in ['P0 App Blocker', 'P1 Release Blocker', 'P2 Defect', 'P3 Polish', 'Idea'] %}
+                      <option value="{{ value }}" {% if item.finding_severity == value %}selected{% endif %}>{{ value }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="col-12 col-md-8">
+                  <label class="form-label fw-semibold" for="item_finding_summary_{{ item.id }}">Finding Summary</label>
+                  <input class="form-control" id="item_finding_summary_{{ item.id }}" name="item_finding_summary_{{ item.id }}" value="{{ item.finding_summary or '' }}" placeholder="Short summary of the observation or blocker.">
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+</form>
+
+<script>
+  (() => {
+    const form = document.getElementById('validation-session-form');
+    const action = document.getElementById('validation-session-action');
+    const itemId = document.getElementById('validation-session-item-id');
+    const targetStatus = document.getElementById('validation-session-target-status');
+    const saveAllTop = document.getElementById('validation-save-all');
+    const saveAllBottom = document.getElementById('validation-save-all-bottom');
+    const handoffPrimary = document.getElementById('validation-generate-handoff');
+    const handoffSecondary = document.getElementById('validation-generate-handoff-secondary');
+    if (!form || !action || !itemId || !targetStatus) return;
+    const submitAction = (value, options = {}) => {
+      action.value = value;
+      itemId.value = options.itemId || '';
+      targetStatus.value = options.targetStatus || '';
+      form.submit();
+    };
+    document.querySelectorAll('[data-save-item]').forEach((button) => {
+      button.addEventListener('click', () => submitAction('save_item', {itemId: button.getAttribute('data-save-item') || ''}));
+    });
+    const saveAll = () => submitAction('save_all');
+    if (saveAllTop) saveAllTop.addEventListener('click', saveAll);
+    if (saveAllBottom) saveAllBottom.addEventListener('click', saveAll);
+    const generateHandoff = () => submitAction('generate_handoff');
+    if (handoffPrimary) handoffPrimary.addEventListener('click', generateHandoff);
+    if (handoffSecondary) handoffSecondary.addEventListener('click', generateHandoff);
+    document.querySelectorAll('[data-session-status]').forEach((button) => {
+      button.addEventListener('click', () => submitAction('set_status', {targetStatus: button.getAttribute('data-session-status') || ''}));
+    });
+  })();
+</script>
+{% endblock %}

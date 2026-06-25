@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 import markdown
+import validation_session_lib as validation_session_store
 
 
 APP_ROOT = Path(__file__).resolve().parent
@@ -187,6 +188,7 @@ def _nav_items() -> list[dict[str, str]]:
         {
             "label": "More",
             "items": [
+                {"label": "Validation Sessions", "endpoint": "validation_sessions"},
                 {"label": "User Requests", "endpoint": "intake"},
                 {"label": "Portfolio Status", "endpoint": "view_file", "args": {"relative_path": "00-dashboard/portfolio-status.md"}},
                 {"label": "Engineering Priorities", "endpoint": "view_file", "args": {"relative_path": "00-dashboard/engineering-priorities.md"}},
@@ -2616,6 +2618,73 @@ def _assistant_update_shipments() -> list[dict[str, str]]:
     return shipments
 
 
+def _validation_session_records() -> list[dict[str, object]]:
+    root = validation_session_store.session_dir(WORKLOG_ROOT)
+    if not root.exists():
+        return []
+    records: list[dict[str, object]] = []
+    for path in sorted(root.glob("*.md"), reverse=True):
+        try:
+            data = validation_session_store.parse_session(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        counts = validation_session_store.session_status_counts(data)
+        records.append(
+            {
+                "path": str(path.relative_to(WORKLOG_ROOT)),
+                "slug": str(data.get("slug") or path.stem),
+                "title": str(data.get("title") or path.stem.replace("-", " ").title()),
+                "app": str(data.get("app") or ""),
+                "run": str(data.get("run") or ""),
+                "track": str(data.get("track") or ""),
+                "release": str(data.get("release") or ""),
+                "status": str(data.get("status") or "in_progress"),
+                "updated_at": str(data.get("updated_at") or ""),
+                "completed_at": str(data.get("completed_at") or ""),
+                "blocked_at": str(data.get("blocked_at") or ""),
+                "pass_count": counts.get("pass", 0),
+                "fail_count": counts.get("fail", 0),
+                "blocked_count": counts.get("blocked", 0),
+                "pending_count": counts.get("pending", 0),
+                "total_items": len(data.get("items") or []),
+            }
+        )
+    return records
+
+
+def _validation_session_record_by_slug(slug: str) -> tuple[Path, dict[str, object]] | tuple[None, None]:
+    path = validation_session_store.session_path(WORKLOG_ROOT, slug)
+    if not path.exists():
+        return None, None
+    return path, validation_session_store.parse_session(path.read_text(encoding="utf-8"))
+
+
+def _validation_session_apply_form(data: dict[str, object], form: dict[str, str], *, item_id: str | None = None) -> dict[str, object]:
+    items = list(data.get("items") or [])
+    target_ids = [item_id] if item_id else [str(item.get("id") or "") for item in items]
+    for current_id in target_ids:
+        if not current_id:
+            continue
+        updates = {
+            "status": form.get(f"item_status_{current_id}") or None,
+            "notes": form.get(f"item_notes_{current_id}") or None,
+            "finding_severity": form.get(f"item_finding_severity_{current_id}") or None,
+            "finding_summary": form.get(f"item_finding_summary_{current_id}") or None,
+        }
+        data = validation_session_store.update_item(data, current_id, updates)
+    final_recommendation = (form.get("final_recommendation") or "").strip()
+    if final_recommendation:
+        data["final_recommendation"] = final_recommendation
+    session_status = (form.get("session_status") or "").strip()
+    if session_status in validation_session_store.ALLOWED_SESSION_STATUSES:
+        data["status"] = session_status
+        if session_status == "completed":
+            data = validation_session_store.complete_session(data)
+        else:
+            data["updated_at"] = validation_session_store.now_iso()
+    return data
+
+
 def _sprint_records() -> list[dict[str, object]]:
     _ensure_sprint_dirs()
     records = []
@@ -4405,6 +4474,78 @@ def regenerate_all_sprint_handoffs():
         "regenerated": regenerated,
         "sprint_queue_url": url_for("sprints"),
     }
+
+
+@app.route("/validation-sessions", methods=["GET"])
+@_require_worklog_session
+def validation_sessions():
+    records = _validation_session_records()
+    return render_template(
+        "validation_sessions.html",
+        title="Validation Sessions",
+        records=records,
+    )
+
+
+@app.route("/validation-sessions/<session_slug>", methods=["GET", "POST"])
+@_require_worklog_session
+def validation_session_detail(session_slug: str):
+    record_path, record = _validation_session_record_by_slug(session_slug)
+    if not record_path or not record:
+        abort(404)
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip().lower()
+        if action == "save_item":
+            item_id = (request.form.get("item_id") or "").strip()
+            if not item_id:
+                abort(400)
+            record = _validation_session_apply_form(record, request.form, item_id=item_id)
+            validation_session_store.write_session(record_path, record)
+            flash("Validation item saved.", "success")
+        elif action == "save_all":
+            record = _validation_session_apply_form(record, request.form)
+            validation_session_store.write_session(record_path, record)
+            flash("Validation session saved.", "success")
+        elif action == "set_status":
+            target_status = (request.form.get("target_status") or "").strip()
+            if target_status not in validation_session_store.ALLOWED_SESSION_STATUSES:
+                abort(400)
+            record["status"] = target_status
+            if target_status == "completed":
+                record = validation_session_store.complete_session(record)
+            else:
+                record["updated_at"] = validation_session_store.now_iso()
+                if target_status == "blocked":
+                    record["blocked_at"] = validation_session_store.now_iso()
+            record = _validation_session_apply_form(record, request.form)
+            validation_session_store.write_session(record_path, record)
+            flash(f"Validation session marked {target_status.replace('_', ' ')}.", "success")
+        elif action == "generate_handoff":
+            handoff_dir = validation_session_store.handoff_dir(WORKLOG_ROOT)
+            handoff_dir.mkdir(parents=True, exist_ok=True)
+            output = handoff_dir / f"{record.get('slug') or session_slug}.md"
+            handoff_md = validation_session_store.generate_handoff_markdown(record, session_path_value=record_path)
+            output.write_text(handoff_md, encoding="utf-8")
+            record["handoff_path"] = str(output.relative_to(WORKLOG_ROOT))
+            record["updated_at"] = validation_session_store.now_iso()
+            validation_session_store.write_session(record_path, record)
+            flash("ChatGPT handoff generated.", "success")
+        else:
+            abort(400)
+        return redirect(url_for("validation_session_detail", session_slug=record.get("slug") or session_slug))
+    handoff_path = str(record.get("handoff_path") or "").strip()
+    handoff_markdown = ""
+    if handoff_path:
+        handoff_file = WORKLOG_ROOT / handoff_path
+        if handoff_file.exists():
+            handoff_markdown = handoff_file.read_text(encoding="utf-8")
+    return render_template(
+        "validation_session_detail.html",
+        title=record.get("title") or "Validation Session",
+        record=record,
+        handoff_path=handoff_path,
+        handoff_markdown=handoff_markdown,
+    )
 
 
 @app.route("/api/assistant/thoughts")
