@@ -131,6 +131,56 @@ class ValidationSessionGuiTests(unittest.TestCase):
         self.assertIn('status: "pass"', saved)
         self.assertIn('notes: "Verified in DEV."', saved)
 
+    def test_validation_session_clear_note_and_generate_handoff_keeps_blank_notes(self) -> None:
+        client = self._client()
+        client.post(
+            "/validation-sessions/ims-warehouse-foundation-release-1-0-validation",
+            data={
+                "action": "save_item",
+                "item_id": "break-bulk-intake-wizard",
+                "item_status_break-bulk-intake-wizard": "fail",
+                "item_notes_break-bulk-intake-wizard": "HANDOFF_NOTES_INCLUDED_TEST_456",
+                "item_finding_severity_break-bulk-intake-wizard": "P1 Release Blocker",
+                "item_finding_summary_break-bulk-intake-wizard": "Save still fails.",
+                "session_status": "in_progress",
+            },
+            follow_redirects=True,
+        )
+        client.post(
+            "/validation-sessions/ims-warehouse-foundation-release-1-0-validation",
+            data={
+                "action": "save_item",
+                "item_id": "break-bulk-intake-wizard",
+                "item_status_break-bulk-intake-wizard": "fail",
+                "item_notes_break-bulk-intake-wizard": "",
+                "item_finding_severity_break-bulk-intake-wizard": "P1 Release Blocker",
+                "item_finding_summary_break-bulk-intake-wizard": "Save still fails.",
+                "session_status": "in_progress",
+            },
+            follow_redirects=True,
+        )
+        response = client.post(
+            "/validation-sessions/ims-warehouse-foundation-release-1-0-validation",
+            data={
+                "action": "generate_handoff",
+                "include_notes": "1",
+                "include_passed": "1",
+                "include_pending": "1",
+                "include_blocked": "1",
+                "include_na": "1",
+                "include_finding_summaries": "1",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        text = response.get_data(as_text=True)
+        self.assertNotIn("HANDOFF_NOTES_INCLUDED_TEST_456</textarea>", text)
+        self.assertIn("Notes:", text)
+        self.assertIn("(none)", text)
+        self.assertIn("Validation Session Handoff", text)
+        self.assertIn("Pass Count: 3", text)
+        self.assertIn("Fail Count: 1", text)
+
     def test_validation_session_save_all_and_generate_handoff(self) -> None:
         response = self._client().post(
             "/validation-sessions/ims-warehouse-foundation-release-1-0-validation",
@@ -229,10 +279,10 @@ class ValidationSessionGuiTests(unittest.TestCase):
             "/validation-sessions/ims-warehouse-foundation-release-1-0-validation?format=json",
             data={
                 "action": "generate_handoff",
-                "item_status_break-bulk-intake-wizard": "pass",
+                "item_status_break-bulk-intake-wizard": "fail",
                 "item_notes_break-bulk-intake-wizard": "HANDOFF_NOTES_INCLUDED_TEST_456",
-                "item_finding_severity_break-bulk-intake-wizard": "",
-                "item_finding_summary_break-bulk-intake-wizard": "",
+                "item_finding_severity_break-bulk-intake-wizard": "P1 Release Blocker",
+                "item_finding_summary_break-bulk-intake-wizard": "Break Bulk Intake Wizard save fails with HTTP 400.",
                 "include_notes": "1",
                 "include_passed": "1",
                 "include_pending": "1",

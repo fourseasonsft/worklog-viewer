@@ -2666,10 +2666,10 @@ def _validation_session_apply_form(data: dict[str, object], form: dict[str, str]
         if not current_id:
             continue
         updates = {
-            "status": form.get(f"item_status_{current_id}") or None,
-            "notes": form.get(f"item_notes_{current_id}") or None,
-            "finding_severity": form.get(f"item_finding_severity_{current_id}") or None,
-            "finding_summary": form.get(f"item_finding_summary_{current_id}") or None,
+            "status": form.get(f"item_status_{current_id}") if f"item_status_{current_id}" in form else None,
+            "notes": form.get(f"item_notes_{current_id}") if f"item_notes_{current_id}" in form else None,
+            "finding_severity": form.get(f"item_finding_severity_{current_id}") if f"item_finding_severity_{current_id}" in form else None,
+            "finding_summary": form.get(f"item_finding_summary_{current_id}") if f"item_finding_summary_{current_id}" in form else None,
         }
         data = validation_session_store.update_item(data, current_id, updates)
     final_recommendation = (form.get("final_recommendation") or "").strip()
