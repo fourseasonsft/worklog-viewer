@@ -4539,10 +4539,25 @@ def validation_session_detail(session_slug: str):
         handoff_file = WORKLOG_ROOT / handoff_path
         if handoff_file.exists():
             handoff_markdown = handoff_file.read_text(encoding="utf-8")
+    items = list(record.get("items") or [])
+    sections: list[dict[str, object]] = []
+    seen_sections: list[str] = []
+    for item in items:
+        section = str(item.get("section") or "Section").strip() or "Section"
+        if section not in seen_sections:
+            seen_sections.append(section)
+            sections.append({"section": section, "items": []})
+        for bucket in sections:
+            if bucket["section"] == section:
+                bucket["items"].append(item)
+                break
+    counts = validation_session_store.session_status_counts(record)
     return render_template(
         "validation_session_detail.html",
         title=record.get("title") or "Validation Session",
         record=record,
+        sections=sections,
+        status_counts=counts,
         handoff_path=handoff_path,
         handoff_markdown=handoff_markdown,
     )

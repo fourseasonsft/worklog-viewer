@@ -60,9 +60,15 @@ class ValidationSessionGuiTests(unittest.TestCase):
 
     def test_validation_session_detail_renders(self) -> None:
         html = self._client().get("/validation-sessions/ims-warehouse-foundation-release-1-0-validation").get_data(as_text=True)
-        self.assertIn("Fill out the pass / fail / notes workflow first", html)
+        self.assertIn("Fill the survey quickly with pass / fail / pending / blocked / N/A, then add notes and findings where needed.", html)
         self.assertIn("Break Bulk Intake Wizard", html)
-        self.assertIn("Mark In Progress", html)
+        self.assertIn("Pass", html)
+        self.assertIn("Fail", html)
+        self.assertIn("Pending", html)
+        self.assertIn("Blocked", html)
+        self.assertIn("N/A", html)
+        self.assertIn('name="item_notes_break-bulk-intake-wizard"', html)
+        self.assertIn("finding_details_break-bulk-intake-wizard", html)
         self.assertIn("Generate ChatGPT Handoff", html)
 
     def test_validation_session_save_item_updates_fields(self) -> None:
@@ -90,6 +96,25 @@ class ValidationSessionGuiTests(unittest.TestCase):
         self.assertIn('finding_severity: "P1 Release Blocker"', saved)
         self.assertIn('finding_summary: "Save still fails."', saved)
         self.assertIn('final_recommendation: "Review the blocker first."', saved)
+
+    def test_validation_session_save_pass_item_updates_notes(self) -> None:
+        response = self._client().post(
+            "/validation-sessions/ims-warehouse-foundation-release-1-0-validation",
+            data={
+                "action": "save_item",
+                "item_id": "internal-pallet-ids",
+                "item_status_internal-pallet-ids": "pass",
+                "item_notes_internal-pallet-ids": "Verified in DEV.",
+                "item_finding_severity_internal-pallet-ids": "",
+                "item_finding_summary_internal-pallet-ids": "",
+                "session_status": "in_progress",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        saved = (self.root / "07-validation-sessions/ims-warehouse-foundation-release-1-0-validation.md").read_text(encoding="utf-8")
+        self.assertIn('status: "pass"', saved)
+        self.assertIn('notes: "Verified in DEV."', saved)
 
     def test_validation_session_save_all_and_generate_handoff(self) -> None:
         response = self._client().post(
