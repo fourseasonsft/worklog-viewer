@@ -11,9 +11,9 @@
       <div class="d-flex flex-wrap gap-2">
         <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('validation_sessions') }}">Back to Validation Sessions</a>
         <a class="btn btn-outline-primary btn-sm" href="{{ url_for('sprints') }}">Sprint Queue</a>
-        <button class="btn btn-primary btn-sm" type="submit" name="action" value="generate_handoff" formaction="{{ url_for('validation_session_detail', session_slug=record.slug) }}?action=generate_handoff" id="validation-generate-handoff">Generate Handoff</button>
-        <button class="btn btn-outline-primary btn-sm" type="button" id="validation-copy-handoff">📋 Copy Handoff</button>
-        <button class="btn btn-outline-dark btn-sm" type="button" id="validation-copy-ai-prompt">🤖 Copy AI Prompt</button>
+        <button class="btn btn-primary btn-sm" type="submit" form="validation-session-form" name="action" value="generate_handoff" formaction="{{ url_for('validation_session_detail', session_slug=record.slug) }}?action=generate_handoff" id="validation-generate-handoff">Generate Handoff</button>
+        <button class="btn btn-outline-primary btn-sm" type="button" id="validation-copy-handoff" {% if not handoff_markdown %}disabled{% endif %}>📋 Copy Handoff</button>
+        <button class="btn btn-outline-dark btn-sm" type="button" id="validation-copy-ai-prompt" {% if not handoff_markdown %}disabled{% endif %}>🤖 Copy AI Prompt</button>
       </div>
     </div>
   </div>
@@ -101,13 +101,13 @@
           {% if handoff_markdown %}
             <div class="mt-3">
               <div class="text-secondary small mb-1">Generated Handoff</div>
-              <pre class="assistant-pre">{{ handoff_markdown }}</pre>
+              <pre class="assistant-pre" id="validation-generated-handoff">{{ handoff_markdown }}</pre>
             </div>
           {% endif %}
           {% if ai_prompt %}
             <div class="mt-3">
               <div class="text-secondary small mb-1">AI Prompt Preview</div>
-              <pre class="assistant-pre">{{ ai_prompt }}</pre>
+              <pre class="assistant-pre" id="validation-generated-ai-prompt">{{ ai_prompt }}</pre>
             </div>
           {% endif %}
         </div>
@@ -210,50 +210,36 @@
     const copyModalClose = document.getElementById('validation-copy-modal-close');
     const handoffMessage = document.getElementById('validation-handoff-message');
     const handoffPath = document.getElementById('validation-handoff-path');
-    const includeNotes = document.getElementById('handoff_include_notes');
-    const includePassed = document.getElementById('handoff_include_passed');
-    const includePending = document.getElementById('handoff_include_pending');
-    const includeBlocked = document.getElementById('handoff_include_blocked');
-    const includeNa = document.getElementById('handoff_include_na');
-    const includeFindings = document.getElementById('handoff_include_findings');
+    const generatedHandoff = document.getElementById('validation-generated-handoff');
+    const generatedAiPrompt = document.getElementById('validation-generated-ai-prompt');
     if (!form || !action || !itemId || !targetStatus) return;
     const copyModalInstance = copyModal ? bootstrap.Modal.getOrCreateInstance(copyModal) : null;
-    const getHandoffOptions = () => ({
-      include_notes: includeNotes?.checked ?? true,
-      include_passed: includePassed?.checked ?? true,
-      include_pending: includePending?.checked ?? true,
-      include_blocked: includeBlocked?.checked ?? true,
-      include_na: includeNa?.checked ?? true,
-      include_finding_summaries: includeFindings?.checked ?? true,
-    });
-    const requestHandoff = async () => {
-      if (handoffMessage) {
-        handoffMessage.classList.add('d-none');
-        handoffMessage.textContent = '';
+    const getGeneratedHandoffText = () => generatedHandoff ? generatedHandoff.textContent || '' : '';
+    const getGeneratedAiPromptText = () => {
+      if (generatedAiPrompt) {
+        return generatedAiPrompt.textContent || '';
       }
-      const payload = new FormData(form);
-      payload.set('action', 'generate_handoff');
-      for (const [key, value] of Object.entries(getHandoffOptions())) {
-        payload.set(key, value ? '1' : '0');
-      }
-      const response = await fetch(window.location.pathname + '?format=json', {
-        method: 'POST',
-        headers: {'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/x-www-form-urlencoded'},
-        body: new URLSearchParams(payload).toString(),
-      });
-      const data = await response.json();
-      if (!response.ok || !data.ok) {
-        throw new Error(data.error || 'Failed to generate validation handoff.');
-      }
-      if (handoffPath && data.handoff_path) {
-        handoffPath.textContent = data.handoff_path;
-      }
-      if (handoffMessage) {
-        handoffMessage.className = 'alert alert-success mt-3';
-        handoffMessage.textContent = `Handoff generated successfully.\nLocation:\n${data.handoff_path}`;
-        handoffMessage.classList.remove('d-none');
-      }
-      return data;
+      const handoffText = getGeneratedHandoffText();
+      if (!handoffText) return '';
+      return [
+        'Analyze the following Operational Validation Session.',
+        '',
+        'Please:',
+        '',
+        '• Summarize the findings.',
+        '• Identify probable root causes.',
+        '• Group related issues.',
+        '• Recommend implementation order.',
+        '• Identify technical debt.',
+        '• Identify regression risks.',
+        '• Recommend release readiness.',
+        '• Produce a prioritized implementation plan.',
+        '',
+        '=== VALIDATION HANDOFF ===',
+        '',
+        handoffText.trim(),
+        '',
+      ].join('\n');
     };
     const showCopyFallback = (text) => {
       if (!copyModalInstance || !copyModalText) return;
@@ -271,25 +257,6 @@
         throw error;
       }
     };
-    const buildPrompt = (handoffText) => [
-      'Analyze the following Operational Validation Session.',
-      '',
-      'Please:',
-      '',
-      '• Summarize the findings.',
-      '• Identify probable root causes.',
-      '• Group related issues.',
-      '• Recommend implementation order.',
-      '• Identify technical debt.',
-      '• Identify regression risks.',
-      '• Recommend release readiness.',
-      '• Produce a prioritized implementation plan.',
-      '',
-      '=== VALIDATION HANDOFF ===',
-      '',
-      handoffText.trim(),
-      '',
-    ].join('\n');
     document.querySelectorAll('.validation-status-radio').forEach((radio) => {
       radio.addEventListener('change', () => {
         const targetId = radio.getAttribute('data-status-target');
@@ -299,20 +266,14 @@
         details.open = ['fail', 'blocked'].includes(radio.value);
       });
     });
-    const generateAndMaybeCopy = async (mode) => {
-      const response = await requestHandoff();
-      const text = mode === 'prompt' ? buildPrompt(response.handoff_markdown) : response.handoff_markdown;
-      if (mode === 'prompt') {
-        await copyText(text, '✅ ChatGPT prompt copied to clipboard.');
-      } else if (mode === 'handoff') {
-        await copyText(text, '✅ Validation handoff copied to clipboard.');
-      }
-      return response;
-    };
     if (copyHandoff) {
       copyHandoff.addEventListener('click', async () => {
         try {
-          await generateAndMaybeCopy('handoff');
+          const text = getGeneratedHandoffText();
+          if (!text) {
+            throw new Error('Generate a handoff first.');
+          }
+          await copyText(text, '✅ Handoff copied to clipboard.');
         } catch (error) {
           // Fallback modal already shown.
         }
@@ -321,7 +282,11 @@
     if (copyAiPrompt) {
       copyAiPrompt.addEventListener('click', async () => {
         try {
-          await generateAndMaybeCopy('prompt');
+          const text = getGeneratedAiPromptText();
+          if (!text) {
+            throw new Error('Generate a handoff first.');
+          }
+          await copyText(text, '✅ ChatGPT prompt copied to clipboard.');
         } catch (error) {
           // Fallback modal already shown.
         }
