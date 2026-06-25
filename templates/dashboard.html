@@ -123,6 +123,35 @@
     </div>
   </section>
 
+  {% if current_releases %}
+  <section class="card surface-card card-shadow border-0 mb-4">
+    <div class="card-body p-4 p-xl-5">
+      <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-end mb-3">
+        <div>
+          <div class="text-uppercase text-secondary small fw-semibold mb-2">Current Releases</div>
+          <h2 class="h3 mb-1">Delivery milestones ready for release review</h2>
+          <div class="text-secondary">Release candidates bundle completed sprints with validation evidence.</div>
+        </div>
+        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('releases') }}">View Releases</a>
+      </div>
+      <div class="row g-3">
+        {% for release in current_releases %}
+          <div class="col-12 col-lg-4">
+            <a class="text-decoration-none" href="{{ url_for('release_detail', release_slug=release.slug) }}">
+              <div class="priority-card h-100">
+                <div class="text-uppercase text-secondary small fw-semibold mb-2">{{ release.status or 'Release' }}</div>
+                <div class="fw-semibold text-body mb-1">{{ release.release_name }}</div>
+                <div class="text-secondary small">{{ release.application }}{% if release.run %} · {{ release.run }}{% endif %}{% if release.track %} · {{ release.track }}{% endif %}</div>
+                <div class="mt-2 small text-secondary">Validation {{ release.validation_coverage or 'Not recorded' }}</div>
+              </div>
+            </a>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
   <section class="card surface-card card-shadow border-0 mb-4">
     <div class="card-body p-4 p-xl-5">
       <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-end mb-3">

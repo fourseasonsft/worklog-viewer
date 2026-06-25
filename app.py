@@ -181,6 +181,7 @@ def _nav_items() -> list[dict[str, str]]:
                 {"label": "Idea Inventory", "endpoint": "assistant"},
                 {"label": "Sprint Queue", "endpoint": "sprints"},
                 {"label": "Updates", "endpoint": "release_notes"},
+                {"label": "Releases", "endpoint": "releases"},
                 {"label": "Inbox", "endpoint": "inbox"},
                 {"label": "Daily Log", "endpoint": "daily_logs"},
             ],
@@ -197,6 +198,7 @@ def _nav_items() -> list[dict[str, str]]:
                 {"label": "Runbooks", "endpoint": "runbooks"},
                 {"label": "Decisions", "endpoint": "decisions"},
                 {"label": "Release Notes", "endpoint": "release_notes"},
+                {"label": "Releases", "endpoint": "releases"},
                 {"label": "Notifications", "endpoint": "notifications_preview"},
                 {"label": "Ideas", "endpoint": "ideas"},
                 {"label": "Inbox", "endpoint": "inbox"},
@@ -210,6 +212,104 @@ def _category_files(category: str) -> list[str]:
     if not root.exists():
         return []
     return [str(path.relative_to(WORKLOG_ROOT)) for path in sorted(root.rglob("*.md"))]
+
+
+def _release_dir() -> Path:
+    return WORKLOG_ROOT / "03-releases"
+
+
+def _release_files() -> list[Path]:
+    root = _release_dir()
+    if not root.exists():
+        return []
+    return [path for path in sorted(root.rglob("*.md")) if path.is_file() and path.name != "README.md"]
+
+
+def _release_slug_from_path(path: Path) -> str:
+    return path.stem.strip().lower().replace("_", "-")
+
+
+def _parse_release_file(path: Path) -> dict[str, object]:
+    text = path.read_text(encoding="utf-8")
+    title = path.stem.replace("-", " ").strip().title()
+    sections: list[dict[str, object]] = []
+    current_section: dict[str, object] | None = None
+    metadata: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        if line.startswith("# "):
+            title = line[2:].strip()
+            continue
+        if line.startswith("## "):
+            section_title = line[3:].strip()
+            current_section = {"title": section_title, "lines": []}
+            sections.append(current_section)
+            continue
+        if current_section is not None:
+            current_section["lines"].append(line)
+        if current_section and current_section["title"].lower() == "release metadata" and line.startswith("- "):
+            key, _, value = line[2:].partition(":")
+            if key.strip():
+                metadata[key.strip().lower().replace(" ", "_")] = value.strip()
+
+    def _section_items(section_title: str) -> list[str]:
+        for section in sections:
+            if str(section.get("title") or "").strip().lower() == section_title.lower():
+                return [line[2:].strip() for line in section.get("lines") or [] if line.startswith("- ")]
+        return []
+
+    def _section_text(section_title: str) -> str:
+        for section in sections:
+            if str(section.get("title") or "").strip().lower() == section_title.lower():
+                body_lines = [line for line in section.get("lines") or [] if not line.startswith("- ") and line.strip()]
+                return "\n".join(body_lines).strip()
+        return ""
+
+    def _section_value(section_title: str) -> str:
+        items = _section_items(section_title)
+        if items:
+            return items[0]
+        return _section_text(section_title)
+
+    release_id = metadata.get("release_id") or metadata.get("release name") or path.stem
+    return {
+        "slug": _release_slug_from_path(path),
+        "path": str(path.relative_to(WORKLOG_ROOT)),
+        "title": title,
+        "release_id": release_id,
+        "release_name": metadata.get("release_name") or title,
+        "application": metadata.get("application") or "",
+        "program": metadata.get("program") or "",
+        "marathon": metadata.get("marathon") or "",
+        "run": metadata.get("run") or "",
+        "track": metadata.get("track") or "",
+        "version": metadata.get("version") or "",
+        "status": metadata.get("status") or "",
+        "scope": _section_text("Scope"),
+        "included_sprints": _section_items("Included Sprints"),
+        "included_validation_sessions": _section_items("Included Validation Sessions"),
+        "release_notes": _section_items("Release Notes"),
+        "known_issues": _section_items("Known Issues"),
+        "deferred_items": _section_items("Deferred Items"),
+        "release_health": _section_items("Release Health"),
+        "validation_coverage": _section_value("Validation Coverage"),
+        "release_confidence": _section_text("Release Confidence"),
+        "go_no_go_recommendation": _section_text("Go / No-Go Recommendation"),
+        "production_rollout_plan": _section_items("Production Rollout Plan"),
+        "rollback_plan": _section_text("Rollback Plan"),
+        "validation_session_notes": _section_text("Validation Session Notes"),
+    }
+
+
+def _release_records() -> list[dict[str, object]]:
+    return [_parse_release_file(path) for path in _release_files()]
+
+
+def _release_record_by_slug(slug: str) -> dict[str, object] | None:
+    for record in _release_records():
+        if record.get("slug") == slug:
+            return record
+    return None
 
 
 def _relative_md_files(relative_dir: str) -> list[Path]:
@@ -4038,6 +4138,7 @@ def dashboard():
     inbox_items = _recent_inbox_items()
     update_shipments = _assistant_update_shipments()
     sprint_counts = _sprint_counts_by_app()
+    current_releases = [record for record in _release_records() if str(record.get("status") or "").strip().lower() in {"release candidate", "approved", "released"}][:3]
 
     return render_template(
         "dashboard.html",
@@ -4046,6 +4147,7 @@ def dashboard():
         sprint_counts=sprint_counts,
         inbox_items=inbox_items,
         update_shipments=update_shipments,
+        current_releases=current_releases,
     )
 
 
@@ -4098,6 +4200,22 @@ def decisions():
 @_require_worklog_session
 def release_notes():
     return render_template("listing.html", title="Release Notes", items=_category_files("05-release-notes"))
+
+
+@app.route("/releases")
+@_require_worklog_session
+def releases():
+    records = _release_records()
+    return render_template("releases.html", title="Releases", records=records)
+
+
+@app.route("/releases/<release_slug>")
+@_require_worklog_session
+def release_detail(release_slug: str):
+    record = _release_record_by_slug(release_slug)
+    if not record:
+        abort(404)
+    return render_template("release_detail.html", title=record.get("release_name") or record.get("title") or "Release", record=record)
 
 
 @app.route("/ideas")

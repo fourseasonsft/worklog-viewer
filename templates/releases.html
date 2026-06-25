@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card surface-card card-shadow border-0 mb-4">
+  <div class="card-body p-4 p-xl-5">
+    <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-end">
+      <div>
+        <div class="eyebrow text-uppercase text-secondary small fw-semibold mb-2">Releases</div>
+        <h1 class="h2 mb-2">Release milestones for Worklog and connected apps</h1>
+        <p class="text-secondary mb-0">Delivery milestones bundle completed sprints with validation evidence so David can review readiness from the browser.</p>
+      </div>
+      <a class="btn btn-outline-primary btn-sm" href="{{ url_for('dashboard') }}">Dashboard</a>
+    </div>
+  </div>
+</section>
+
+<section class="card surface-card card-shadow border-0">
+  <div class="card-body p-4 p-xl-5">
+    {% if records %}
+      <div class="row g-3">
+        {% for record in records %}
+          <div class="col-12 col-xl-6">
+            <a class="text-decoration-none" href="{{ url_for('release_detail', release_slug=record.slug) }}">
+              <div class="priority-card h-100">
+                <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+                  <div class="text-uppercase text-secondary small fw-semibold">{{ record.status or 'Release' }}</div>
+                  <div class="card-pill">{{ record.version or 'Version not set' }}</div>
+                </div>
+                <div class="fw-semibold text-body mb-1">{{ record.release_name }}</div>
+                <div class="text-secondary small mb-2">{{ record.application }}{% if record.run %} · {{ record.run }}{% endif %}{% if record.track %} · {{ record.track }}{% endif %}</div>
+                <div class="text-secondary small">Validation {{ record.validation_coverage or 'Not recorded' }}</div>
+              </div>
+            </a>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="text-secondary">No release records yet.</div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}
