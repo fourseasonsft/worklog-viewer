@@ -82,6 +82,7 @@ class ValidationSessionGuiTests(unittest.TestCase):
         self.assertIn('type="submit" name="action" value="save_all"', html)
         self.assertIn('type="submit" name="action" value="generate_handoff"', html)
         self.assertIn('type="submit" name="action" value="save_item"', html)
+        self.assertIn('form="validation-session-form"', html)
         self.assertNotIn('<form method="post"><form', html)
 
     def test_validation_session_save_item_updates_fields(self) -> None:
@@ -211,6 +212,42 @@ class ValidationSessionGuiTests(unittest.TestCase):
         self.assertIn("Internal Pallet IDs", payload["handoff_markdown"])
         self.assertIn("Status: PASS", payload["handoff_markdown"])
         self.assertIn("HANDOFF_REFRESH_TEST_123", payload["handoff_markdown"])
+        self.assertIn("HANDOFF_REFRESH_TEST_123", payload["ai_prompt"])
+        handoff_path = self.root / payload["handoff_path"]
+        self.assertTrue(handoff_path.exists())
+        self.assertIn("HANDOFF_REFRESH_TEST_123", handoff_path.read_text(encoding="utf-8"))
+        self.assertIn("Notes:", handoff_path.read_text(encoding="utf-8"))
+
+    def test_validation_session_copy_endpoints_use_refreshed_handoff(self) -> None:
+        response = self._client().post(
+            "/validation-sessions/ims-warehouse-foundation-release-1-0-validation?format=json",
+            data={
+                "action": "generate_handoff",
+                "item_status_break-bulk-intake-wizard": "pass",
+                "item_notes_break-bulk-intake-wizard": "HANDOFF_NOTES_INCLUDED_TEST_456",
+                "item_finding_severity_break-bulk-intake-wizard": "",
+                "item_finding_summary_break-bulk-intake-wizard": "",
+                "include_notes": "1",
+                "include_passed": "1",
+                "include_pending": "1",
+                "include_blocked": "1",
+                "include_na": "1",
+                "include_finding_summaries": "1",
+            },
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertIn("HANDOFF_NOTES_INCLUDED_TEST_456", payload["handoff_markdown"])
+        self.assertIn("HANDOFF_NOTES_INCLUDED_TEST_456", payload["ai_prompt"])
+        handoff_path = self.root / payload["handoff_path"]
+        handoff_text = handoff_path.read_text(encoding="utf-8")
+        self.assertIn("HANDOFF_NOTES_INCLUDED_TEST_456", handoff_text)
+        self.assertIn("Notes:", handoff_text)
+        self.assertIn("Finding Severity: P1 Release Blocker", handoff_text)
+        self.assertIn("Finding Summary: Break Bulk Intake Wizard save fails with HTTP 400.", handoff_text)
+        self.assertIn("Pass Count:", handoff_text)
+        self.assertIn("(none)", handoff_text)
 
     def test_validation_session_generate_handoff_uses_latest_form_values(self) -> None:
         response = self._client().post(

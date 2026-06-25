@@ -424,16 +424,17 @@ def generate_handoff_markdown(
         for item in included_items:
             status = str(item.get("status") or "pending")
             lines.append(f"### {item.get('section') or 'Section'}")
-            lines.append(f"- {('✔' if status == 'pass' else '✖' if status == 'fail' else '⚠' if status == 'blocked' else '•')} {item.get('description') or 'No description recorded.'}")
+            lines.append(f"- ID: {item.get('id') or 'Not recorded yet'}")
+            lines.append(f"- Description: {item.get('description') or 'No description recorded.'}")
             lines.append(f"- Status: {_status_label(status)}")
             if include_notes:
-                lines.append("  - Notes:")
-                notes = str(item.get('notes') or '').strip() or 'Not recorded yet'
+                notes = str(item.get('notes') or '').strip() or '(none)'
+                lines.append("- Notes:")
                 for line in notes.splitlines():
-                    lines.append(f"    {line}")
+                    lines.append(f"  {line}")
             if status in {"fail", "blocked"} or include_finding_summaries:
-                lines.append(f"- Finding Severity: {item.get('finding_severity') or 'Not recorded yet'}")
-                lines.append(f"- Finding Summary: {item.get('finding_summary') or 'Not recorded yet'}")
+                lines.append(f"- Finding Severity: {item.get('finding_severity') or '(none)'}")
+                lines.append(f"- Finding Summary: {item.get('finding_summary') or '(none)'}")
             lines.append("")
     else:
         lines.append("- None")
