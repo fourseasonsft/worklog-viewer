@@ -55,6 +55,8 @@ class ValidationSessionGuiTests(unittest.TestCase):
         self.assertIn("Validation Sessions", html)
         self.assertIn("IMS Warehouse Foundation Release 1.0 Validation", html)
         self.assertIn("Enterprise Shipment Management", html)
+        base_html = self._client().get("/assistant").get_data(as_text=True)
+        self.assertIn(">Validation Sessions<", base_html)
 
     def test_validation_session_detail_renders(self) -> None:
         html = self._client().get("/validation-sessions/ims-warehouse-foundation-release-1-0-validation").get_data(as_text=True)
