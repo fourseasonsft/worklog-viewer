@@ -300,13 +300,9 @@
     });
     const saveAll = () => submitAction('save_all');
     if (saveAllTop) saveAllTop.addEventListener('click', saveAll);
-    const generateHandoff = () => {
-      requestHandoff().catch(() => {});
-    };
+    const generateHandoff = () => submitAction('generate_handoff');
     if (handoffPrimary) handoffPrimary.addEventListener('click', generateHandoff);
-    if (handoffSecondary) handoffSecondary.addEventListener('click', () => {
-      requestHandoff().catch(() => {});
-    });
+    if (handoffSecondary) handoffSecondary.addEventListener('click', generateHandoff);
     document.querySelectorAll('[data-session-status]').forEach((button) => {
       button.addEventListener('click', () => submitAction('set_status', {targetStatus: button.getAttribute('data-session-status') || ''}));
     });

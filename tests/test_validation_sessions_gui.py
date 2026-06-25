@@ -151,6 +151,30 @@ class ValidationSessionGuiTests(unittest.TestCase):
         self.assertTrue(handoff_path.exists())
         self.assertIn("Validation Session Handoff", handoff_path.read_text(encoding="utf-8"))
 
+    def test_validation_session_generate_handoff_page_round_trip(self) -> None:
+        response = self._client().post(
+            "/validation-sessions/ims-warehouse-foundation-release-1-0-validation",
+            data={
+                "action": "generate_handoff",
+                "session_status": "blocked",
+                "final_recommendation": "Resolve the intake wizard save issue.",
+                "include_notes": "1",
+                "include_passed": "1",
+                "include_pending": "1",
+                "include_blocked": "1",
+                "include_na": "1",
+                "include_finding_summaries": "1",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        text = response.get_data(as_text=True)
+        self.assertIn("ChatGPT handoff generated.", text)
+        self.assertIn("Handoff Path", text)
+        self.assertIn("validation-sessions/ims-warehouse-foundation-release-1-0-validation.md", text)
+        self.assertIn("Validation Session Handoff", text)
+        self.assertIn("Analyze the following Operational Validation Session.", text)
+
     def test_validation_session_generate_handoff_json_and_prompt(self) -> None:
         response = self._client().post(
             "/validation-sessions/ims-warehouse-foundation-release-1-0-validation?format=json",
