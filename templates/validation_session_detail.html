@@ -231,14 +231,15 @@
         handoffMessage.classList.add('d-none');
         handoffMessage.textContent = '';
       }
-      const payload = new URLSearchParams({
-        action: 'generate_handoff',
-        ...Object.fromEntries(Object.entries(getHandoffOptions()).map(([key, value]) => [key, value ? '1' : '0'])),
-      });
+      const payload = new FormData(form);
+      payload.set('action', 'generate_handoff');
+      for (const [key, value] of Object.entries(getHandoffOptions())) {
+        payload.set(key, value ? '1' : '0');
+      }
       const response = await fetch(window.location.pathname + '?format=json', {
         method: 'POST',
         headers: {'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/x-www-form-urlencoded'},
-        body: payload.toString(),
+        body: new URLSearchParams(payload).toString(),
       });
       const data = await response.json();
       if (!response.ok || !data.ok) {

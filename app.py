@@ -4532,6 +4532,11 @@ def validation_session_detail(session_slug: str):
             validation_session_store.write_session(record_path, record)
             flash(f"Validation session marked {target_status.replace('_', ' ')}.", "success")
         elif action == "generate_handoff":
+            record = _validation_session_apply_form(record, request.form)
+            validation_session_store.write_session(record_path, record)
+            _, refreshed_record = _validation_session_record_by_slug(session_slug)
+            if refreshed_record:
+                record = refreshed_record
             include_notes = _validation_session_form_flag(request.form, "include_notes", True)
             include_passed = _validation_session_form_flag(request.form, "include_passed", True)
             include_pending = _validation_session_form_flag(request.form, "include_pending", True)

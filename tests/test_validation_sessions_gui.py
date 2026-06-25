@@ -185,6 +185,10 @@ class ValidationSessionGuiTests(unittest.TestCase):
             "/validation-sessions/ims-warehouse-foundation-release-1-0-validation?format=json",
             data={
                 "action": "generate_handoff",
+                "item_status_break-bulk-intake-wizard": "pass",
+                "item_notes_break-bulk-intake-wizard": "HANDOFF_REFRESH_TEST_123",
+                "item_finding_severity_break-bulk-intake-wizard": "",
+                "item_finding_summary_break-bulk-intake-wizard": "",
                 "include_notes": "1",
                 "include_passed": "1",
                 "include_pending": "1",
@@ -203,6 +207,42 @@ class ValidationSessionGuiTests(unittest.TestCase):
         self.assertIn("=== VALIDATION HANDOFF ===", payload["ai_prompt"])
         self.assertIn("Internal Pallet IDs", payload["handoff_markdown"])
         self.assertIn("Status: PASS", payload["handoff_markdown"])
+        self.assertIn("HANDOFF_REFRESH_TEST_123", payload["handoff_markdown"])
+
+    def test_validation_session_generate_handoff_uses_latest_form_values(self) -> None:
+        response = self._client().post(
+            "/validation-sessions/ims-warehouse-foundation-release-1-0-validation?format=json",
+            data={
+                "action": "generate_handoff",
+                "session_status": "blocked",
+                "final_recommendation": "Resolve the intake wizard save issue.",
+                "item_status_validation-bad-inputs": "pass",
+                "item_notes_validation-bad-inputs": "HANDOFF_REFRESH_TEST_123",
+                "item_finding_severity_validation-bad-inputs": "",
+                "item_finding_summary_validation-bad-inputs": "",
+                "item_status_regression-checks": "pass",
+                "item_notes_regression-checks": "",
+                "item_finding_severity_regression-checks": "",
+                "item_finding_summary_regression-checks": "",
+                "item_status_release-1-0-readiness-notes": "pass",
+                "item_notes_release-1-0-readiness-notes": "",
+                "item_finding_severity_release-1-0-readiness-notes": "",
+                "item_finding_summary_release-1-0-readiness-notes": "",
+                "include_notes": "1",
+                "include_passed": "1",
+                "include_pending": "1",
+                "include_blocked": "1",
+                "include_na": "1",
+                "include_finding_summaries": "1",
+            },
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertIn("Pending Count: 0", payload["handoff_markdown"])
+        self.assertIn("HANDOFF_REFRESH_TEST_123", payload["handoff_markdown"])
+        self.assertIn("Session Status: blocked", payload["handoff_markdown"])
+        self.assertIn("Resolve the intake wizard save issue.", (self.root / "07-validation-sessions/ims-warehouse-foundation-release-1-0-validation.md").read_text(encoding="utf-8"))
 
     def test_validation_session_mark_completed(self) -> None:
         response = self._client().post(
