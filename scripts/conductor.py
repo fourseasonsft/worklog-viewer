@@ -1,0 +1,265 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+DEFAULT_WORKLOG_ROOT = Path("/opt/fsftdev/fsft-worklog")
+COMMAND_LOG_RELATIVE = Path("08-conductor/command-log.jsonl")
+
+
+@dataclass(slots=True)
+class CommandContext:
+    worklog_root: Path
+    actor: str
+    source: str
+
+
+def _resolve_root(raw_root: str | None) -> Path:
+    return Path(raw_root or DEFAULT_WORKLOG_ROOT).expanduser().resolve()
+
+
+def _read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def _first_nonempty_heading(text: str) -> str:
+    for line in text.splitlines():
+        if line.startswith("# "):
+            return line[2:].strip()
+    return ""
+
+
+def _parse_key_values(text: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        match = re.match(r"^-\s*([^:]+):\s*(.*)$", line.strip())
+        if match:
+            values[match.group(1).strip().lower()] = match.group(2).strip()
+    return values
+
+
+def _active_work_files(root: Path) -> list[Path]:
+    work_dir = root / "03-active-work"
+    if not work_dir.exists():
+        return []
+    return sorted([path for path in work_dir.glob("*.md") if path.is_file()])
+
+
+def _current_focus_file(root: Path) -> Path | None:
+    path = root / "00-dashboard" / "current-focus.md"
+    return path if path.exists() else None
+
+
+def _sprint_files(root: Path) -> list[Path]:
+    sprint_root = root / "06-sprints"
+    if not sprint_root.exists():
+        return []
+    return sorted([path for path in sprint_root.rglob("*.md") if path.is_file() and path.name != "README.md"], reverse=True)
+
+
+def _parse_sprint_record(path: Path) -> dict[str, str]:
+    text = _read_text(path)
+    meta = _parse_key_values(text)
+    title = _first_nonempty_heading(text) or path.stem.replace("-", " ").title()
+    return {
+        "path": str(path),
+        "title": title,
+        "sprint_code": meta.get("sprint code") or meta.get("sprint_code") or meta.get("code") or path.stem.split("-", 1)[0],
+        "status": meta.get("status") or "",
+        "app": meta.get("app product") or meta.get("app") or "",
+        "notes": meta.get("notes") or "",
+    }
+
+
+def _find_sprint(root: Path, code: str) -> dict[str, str] | None:
+    normalized = code.strip().lower()
+    for path in _sprint_files(root):
+        record = _parse_sprint_record(path)
+        if record["sprint_code"].strip().lower() == normalized:
+            return record
+    return None
+
+
+def _report_today(root: Path) -> dict[str, object]:
+    active_files = _active_work_files(root)
+    current_focus_path = _current_focus_file(root)
+    current_focus = _read_text(current_focus_path) if current_focus_path else ""
+    current_focus_title = _first_nonempty_heading(current_focus) if current_focus else ""
+    open_sprints = [record for record in (_parse_sprint_record(path) for path in _sprint_files(root)) if record.get("status", "").lower() in {"proposed", "approved", "active", "staged"}]
+    return {
+        "current_context": {
+            "current_focus": current_focus_title or "Current focus not recorded",
+            "active_work_count": len(active_files),
+            "active_work_items": [path.stem.replace("-", " ").title() for path in active_files],
+        },
+        "status": {
+            "open_sprints": len(open_sprints),
+            "latest_sprint": open_sprints[0] if open_sprints else None,
+        },
+        "what_changed": [
+            "No live mutation performed.",
+            "This command only reads the current Worklog state.",
+        ],
+        "open_decisions": [],
+        "risks": [
+            "Operational status is derived from markdown files and may lag behind external work.",
+        ],
+        "next_recommended_actions": [
+            "Brief ChatGPT on current focus before changing scope.",
+            "Review any active sprint records before planning a new operation.",
+        ],
+        "exact_question_for_chatgpt": "What should Conductor help the engineer decide next based on the current Worklog state?",
+    }
+
+
+def _brief_current(root: Path) -> dict[str, object]:
+    current_focus_path = _current_focus_file(root)
+    current_focus_text = _read_text(current_focus_path) if current_focus_path else ""
+    active_files = _active_work_files(root)
+    return {
+        "current_context": {
+            "artifact": "00-dashboard/current-focus.md" if current_focus_path else None,
+            "summary": _first_nonempty_heading(current_focus_text) or "Current focus not recorded",
+            "active_work_items": [path.stem.replace("-", " ").title() for path in active_files],
+        },
+        "status": {
+            "active_work_count": len(active_files),
+            "current_focus_path": str(current_focus_path) if current_focus_path else None,
+        },
+        "what_changed": [],
+        "open_decisions": [
+            "Which engineering operation should be prioritized next?",
+        ],
+        "risks": [
+            "Attention is the scarce resource; avoid expanding scope without a decision.",
+        ],
+        "next_recommended_actions": [
+            "Review the current focus document.",
+            "Check the engineering priorities document if the focus is unclear.",
+        ],
+        "exact_question_for_chatgpt": "Given the current focus, what should Conductor brief the engineer on next?",
+    }
+
+
+def _brief_sprint(root: Path, sprint_code: str) -> dict[str, object]:
+    sprint = _find_sprint(root, sprint_code)
+    if not sprint:
+        raise FileNotFoundError(f"Sprint not found: {sprint_code}")
+    return {
+        "current_context": {
+            "artifact": sprint["path"],
+            "sprint_code": sprint["sprint_code"],
+            "title": sprint["title"],
+            "app": sprint["app"] or "Not recorded",
+        },
+        "status": {
+            "sprint_status": sprint["status"] or "Not recorded",
+        },
+        "what_changed": [],
+        "open_decisions": [
+            "Is this sprint still the correct engineering priority?",
+        ],
+        "risks": [
+            "If the record is stale, the brief may not match the live engineering state.",
+        ],
+        "next_recommended_actions": [
+            "Review the sprint file and related handoff.",
+            "Update the sprint record if the status is outdated.",
+        ],
+        "exact_question_for_chatgpt": f"What should Conductor tell the engineer about sprint {sprint_code}?",
+    }
+
+
+def _log_command(ctx: CommandContext, command: str, target_artifact: str | None, input_payload: dict[str, object], output_summary: str, changed_files: list[str], errors: list[str], approval_status: str = "not_required") -> None:
+    log_path = ctx.worklog_root / COMMAND_LOG_RELATIVE
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "command": command,
+        "actor": ctx.actor,
+        "source": ctx.source,
+        "target_artifact": target_artifact,
+        "input_payload": input_payload,
+        "output_summary": output_summary,
+        "changed_files": changed_files,
+        "errors": errors,
+        "approval_status": approval_status,
+    }
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, sort_keys=True) + "\n")
+
+
+def _emit(payload: dict[str, object], json_mode: bool) -> None:
+    if json_mode:
+        print(json.dumps(payload, sort_keys=True))
+        return
+    print(payload.get("summary") or payload)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Conductor command layer for structured Worklog operations.")
+    parser.add_argument("--worklog-root", default=str(DEFAULT_WORKLOG_ROOT))
+    parser.add_argument("--actor", default=os.environ.get("CONDUCTOR_ACTOR", "david"))
+    parser.add_argument("--source", default=os.environ.get("CONDUCTOR_SOURCE", "cli"))
+    parser.add_argument("--json", action="store_true", dest="json_mode")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    brief = subparsers.add_parser("brief", help="Generate a structured brief packet.")
+    brief_sub = brief.add_subparsers(dest="brief_command", required=True)
+    brief_current = brief_sub.add_parser("current", help="Brief the current Worklog state.")
+    brief_sprint = brief_sub.add_parser("sprint", help="Brief a sprint by sprint code.")
+    brief_sprint.add_argument("sprint_code")
+
+    report = subparsers.add_parser("report", help="Generate a structured report packet.")
+    report_sub = report.add_subparsers(dest="report_command", required=True)
+    report_today = report_sub.add_parser("today", help="Report today's current state.")
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    root = _resolve_root(args.worklog_root)
+    ctx = CommandContext(worklog_root=root, actor=args.actor, source=args.source)
+
+    try:
+        if args.command == "brief" and args.brief_command == "current":
+            payload = _brief_current(root)
+            payload["summary"] = "Brief packet for current Worklog state"
+            _log_command(ctx, "brief current", "00-dashboard/current-focus.md", {}, "brief packet generated", [], [])
+            _emit(payload, args.json_mode)
+            return 0
+        if args.command == "brief" and args.brief_command == "sprint":
+            payload = _brief_sprint(root, args.sprint_code)
+            payload["summary"] = f"Brief packet for sprint {args.sprint_code}"
+            _log_command(ctx, f"brief sprint {args.sprint_code}", payload["current_context"]["artifact"], {"sprint_code": args.sprint_code}, "brief packet generated", [], [])
+            _emit(payload, args.json_mode)
+            return 0
+        if args.command == "report" and args.report_command == "today":
+            payload = _report_today(root)
+            payload["summary"] = "Report packet for today"
+            _log_command(ctx, "report today", "03-active-work", {}, "report packet generated", [], [])
+            _emit(payload, args.json_mode)
+            return 0
+        parser.error(f"Unsupported command: {args.command}")
+    except FileNotFoundError as exc:
+        error_payload = {"error": str(exc)}
+        _log_command(ctx, " ".join(sys.argv[1:]), None, {}, "", [], [str(exc)])
+        if args.json_mode:
+            print(json.dumps(error_payload, sort_keys=True), file=sys.stderr)
+        else:
+            print(str(exc), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
