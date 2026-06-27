@@ -180,9 +180,7 @@ def _nav_items() -> list[dict[str, str]]:
                 {"label": "Dashboard", "endpoint": "dashboard"},
                 {"label": "Idea Inventory", "endpoint": "assistant"},
                 {"label": "Sprint Queue", "endpoint": "sprints"},
-                {"label": "Updates", "endpoint": "release_notes"},
-                {"label": "Releases", "endpoint": "releases"},
-                {"label": "Inbox", "endpoint": "inbox"},
+                {"label": "Engineering Console", "endpoint": "engineering_console"},
                 {"label": "Daily Log", "endpoint": "daily_logs"},
             ],
         },
@@ -4139,6 +4137,20 @@ def dashboard():
     update_shipments = _assistant_update_shipments()
     sprint_counts = _sprint_counts_by_app()
     current_releases = [record for record in _release_records() if str(record.get("status") or "").strip().lower() in {"release candidate", "approved", "released"}][:3]
+    engineering_focus = [
+        {
+            "title": "Current Work",
+            "items": [item for item in app_cards if item.get("title") in {"IMS", "CY Storage", "Worklog"}][:3],
+        },
+        {
+            "title": "Operational Queues",
+            "items": [
+                {"label": "Idea Inventory", "count": counts.active_applications, "href": url_for("assistant")},
+                {"label": "Sprint Queue", "count": len(_sprint_records()), "href": url_for("sprints")},
+                {"label": "Validation Sessions", "count": len(_validation_session_records()), "href": url_for("validation_sessions")},
+            ],
+        },
+    ]
 
     return render_template(
         "dashboard.html",
@@ -4148,6 +4160,7 @@ def dashboard():
         inbox_items=inbox_items,
         update_shipments=update_shipments,
         current_releases=current_releases,
+        engineering_focus=engineering_focus,
     )
 
 
@@ -4216,6 +4229,62 @@ def release_detail(release_slug: str):
     if not record:
         abort(404)
     return render_template("release_detail.html", title=record.get("release_name") or record.get("title") or "Release", record=record)
+
+
+@app.route("/engineering-console")
+@_require_worklog_session
+def engineering_console():
+    operations = [
+        {
+            "name": "Sprint creation",
+            "description": "Create a proposed sprint from selected ideas using the canonical builder.",
+            "command": "python scripts/create_sprint.py --app IMS --title \"IMS reconciliation\" --source-idea \"<idea text>\" --json-output",
+            "artifact": {"label": "Sprint creation script", "href": url_for("view_file", relative_path="scripts/create_sprint.py")},
+        },
+        {
+            "name": "Validation session",
+            "description": "Create, update, and complete operational validation sessions from the canonical helper.",
+            "command": "python scripts/validation_session.py create --title \"Release readiness\" --app IMS --run \"v1\" --track \"staging\" --release \"1.0.0\"",
+            "artifact": {"label": "Validation helper", "href": url_for("view_file", relative_path="scripts/validation_session.py")},
+        },
+        {
+            "name": "Release generation",
+            "description": "Use the browser flow to prepare release notes and stage release records without shell execution.",
+            "command": "Open a sprint record, update release notes, then review /releases.",
+            "artifact": {"label": "Release notes queue", "href": url_for("release_notes")},
+        },
+        {
+            "name": "Handoff generation",
+            "description": "Regenerate sprint handoffs when approved work changes and validation evidence needs refreshing.",
+            "command": "POST /sprints/regenerate-handoffs with confirm=yes",
+            "artifact": {"label": "Validation sessions", "href": url_for("validation_sessions")},
+        },
+    ]
+    helpers = [
+        {
+            "title": "Canonical helpers",
+            "description": "The helper scripts are the supported entry points for repeatable engineering operations.",
+            "links": [
+                {"label": "Create sprint helper", "href": url_for("view_file", relative_path="scripts/create_sprint.py")},
+                {"label": "Validation helper", "href": url_for("view_file", relative_path="scripts/validation_session.py")},
+            ],
+        },
+        {
+            "title": "Related artifacts",
+            "description": "These files capture the current engineering state and should stay aligned with the helpers.",
+            "links": [
+                {"label": "Engineering priorities", "href": url_for("view_file", relative_path="00-dashboard/engineering-priorities.md")},
+                {"label": "Current focus", "href": url_for("view_file", relative_path="00-dashboard/current-focus.md")},
+                {"label": "Portfolio status", "href": url_for("view_file", relative_path="00-dashboard/portfolio-status.md")},
+            ],
+        },
+    ]
+    return render_template(
+        "engineering_console.html",
+        title="Engineering Console",
+        operations=operations,
+        helpers=helpers,
+    )
 
 
 @app.route("/ideas")

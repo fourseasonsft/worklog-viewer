@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card surface-card card-shadow border-0 mb-4">
+  <div class="card-body p-4 p-xl-5">
+    <div class="d-flex flex-column flex-xl-row justify-content-between gap-4 align-items-xl-start">
+      <div>
+        <div class="eyebrow text-uppercase text-secondary small fw-semibold mb-2">Engineering Console</div>
+        <h1 class="h2 mb-2">Read-only engineering operations surface</h1>
+        <p class="text-secondary mb-0">This page documents the canonical helpers, available engineering operations, and future command execution boundaries. Nothing on this page executes.</p>
+      </div>
+      <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('dashboard') }}">Dashboard</a>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('sprints') }}">Sprint Queue</a>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('validation_sessions') }}">Validation Sessions</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="card surface-card card-shadow border-0 mb-4">
+  <div class="card-body p-4 p-xl-5">
+    <div class="row g-4">
+      {% for helper in helpers %}
+        <div class="col-12 col-xl-6">
+          <div class="priority-card h-100">
+            <div class="text-uppercase text-secondary small fw-semibold mb-2">{{ helper.title }}</div>
+            <p class="text-secondary mb-3">{{ helper.description }}</p>
+            <div class="d-flex flex-wrap gap-2">
+              {% for link in helper.links %}
+                <a class="btn btn-outline-secondary btn-sm" href="{{ link.href }}">{{ link.label }}</a>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="card surface-card card-shadow border-0">
+  <div class="card-body p-4 p-xl-5">
+    <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-end mb-3">
+      <div>
+        <div class="text-uppercase text-secondary small fw-semibold mb-2">Available Operations</div>
+        <h2 class="h3 mb-1">Canonical helper commands and related artifacts</h2>
+        <div class="text-secondary">Copy these commands into a terminal when you are ready to execute them elsewhere.</div>
+      </div>
+    </div>
+    <div class="row g-3">
+      {% for operation in operations %}
+        <div class="col-12 col-xl-6">
+          <div class="command-card">
+            <div class="d-flex justify-content-between gap-2 align-items-start">
+              <div>
+                <div class="card-title fw-semibold">{{ operation.name }}</div>
+                <div class="text-secondary small">{{ operation.description }}</div>
+              </div>
+              <a class="btn btn-outline-secondary btn-sm" href="{{ operation.artifact.href }}">{{ operation.artifact.label }}</a>
+            </div>
+            <div class="mt-3">
+              <label class="form-label small text-uppercase text-secondary fw-semibold">Copyable CLI</label>
+              <div class="input-group">
+                <input class="form-control" type="text" readonly value="{{ operation.command }}">
+                <button class="btn btn-outline-primary copy-command-button" type="button" data-copy-value="{{ operation.command }}">Copy</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+    <div class="mt-4 alert alert-info mb-0">
+      Future command execution remains outside this UI. The page is documentation-only and preserves the existing browser workflows.
+    </div>
+  </div>
+</section>
+
+<script>
+(() => {
+  document.querySelectorAll('.copy-command-button').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const value = button.dataset.copyValue || '';
+      try {
+        await navigator.clipboard.writeText(value);
+        const original = button.textContent;
+        button.textContent = 'Copied';
+        setTimeout(() => { button.textContent = original; }, 1200);
+      } catch (error) {
+        button.textContent = 'Copy failed';
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

@@ -56,6 +56,7 @@
     <div class="card surface-card card-shadow border-0 h-100">
       <div class="card-body p-4 p-xl-5">
         <div class="text-uppercase text-secondary small fw-semibold mb-2">Actions</div>
+        <p class="text-secondary small mb-3">Mark Complete generates draft release notes for review. Mark Done moves the sprint to the Done queue for later Codex reconciliation.</p>
         <div class="d-flex flex-wrap gap-2">
           {% set can_mutate = not record.duplicate_conflict %}
           {% if record.status_key == 'proposed' %}
@@ -79,10 +80,20 @@
             </form>
             <a class="btn btn-outline-secondary" href="{{ url_for('sprints') }}">Back to Sprint Queue</a>
           {% else %}
-            {% if record.status_key in ['active', 'completed', 'staged'] or (record.status_key == 'approved') %}
+            {% if record.status_key in ['active', 'approved'] %}
+              {% if can_mutate %}
+                <form method="post" action="{{ url_for('sprint_action', sprint_id=record.id) }}">
+                  <input type="hidden" name="action" value="complete">
+                  <button class="btn btn-outline-secondary" type="submit">Mark Complete</button>
+                </form>
+              {% else %}
+                <span class="badge text-bg-warning align-self-center">Duplicate code</span>
+              {% endif %}
+            {% endif %}
+            {% if record.status_key in ['active', 'approved', 'completed', 'staged'] %}
               {% if can_mutate %}
                 <form method="post" action="{{ url_for('sprint_action_by_code', sprint_code=record.sprint_code) }}">
-                  <input type="hidden" name="action" value="done">
+                  <input type="hidden" name="action" value="mark_done">
                   <input type="hidden" name="confirm" value="yes">
                   <button class="btn btn-dark" type="submit">Mark Done</button>
                 </form>

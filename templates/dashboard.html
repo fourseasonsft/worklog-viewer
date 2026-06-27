@@ -46,11 +46,12 @@
     <div class="card-body p-4 p-xl-5">
       <div class="d-flex flex-column flex-xl-row justify-content-between gap-4 align-items-xl-start">
         <div class="hero-copy">
-          <div class="eyebrow text-uppercase text-secondary small fw-semibold mb-2">FSFT Worklog Command Center</div>
-          <h1 class="display-6 fw-semibold mb-3">FSFT Worklog Command Center</h1>
-          <p class="lead text-secondary mb-4 mb-xl-0">App-by-app idea logistics and sprint status</p>
+          <div class="eyebrow text-uppercase text-secondary small fw-semibold mb-2">Conductor Engineering Operations</div>
+          <h1 class="display-6 fw-semibold mb-3">Conductor</h1>
+          <p class="lead text-secondary mb-4 mb-xl-0">Current engineering work, portfolio status, and delivery readiness at a glance.</p>
           <div class="d-flex flex-wrap gap-2 mt-3">
             <a class="btn btn-primary btn-lg" href="{{ url_for('assistant') }}">Open Idea Inventory</a>
+            <a class="btn btn-outline-primary btn-lg" href="{{ url_for('engineering_console') }}">Engineering Console</a>
             <a class="btn btn-outline-secondary btn-sm align-self-center" href="{{ url_for('intake') }}">User Requests</a>
           </div>
         </div>
@@ -58,6 +59,45 @@
           <div class="card-pill">Capture → Group → Digest → Approve → Route → Execute → Stage → Ship</div>
           <div class="card-pill">Read-only markdown backed</div>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card surface-card card-shadow border-0 mb-4">
+    <div class="card-body p-4 p-xl-5">
+      <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-end mb-3">
+        <div>
+          <div class="text-uppercase text-secondary small fw-semibold mb-2">Engineering Focus</div>
+          <h2 class="h3 mb-1">Where the team is spending attention</h2>
+          <div class="text-secondary">The dashboard is shifting toward engineering operations without changing the existing workflows.</div>
+        </div>
+      </div>
+      <div class="row g-3">
+        {% for section in engineering_focus %}
+          <div class="col-12 col-xl-6">
+            <div class="priority-card h-100">
+              <div class="text-uppercase text-secondary small fw-semibold mb-2">{{ section.title }}</div>
+              {% if section.items and section.items[0].get('title') %}
+                {% for item in section.items %}
+                  <div class="focus-item">
+                    <div class="fw-semibold">{{ item.title }}</div>
+                    <div class="text-secondary small">{{ item.current_sprint_name or item.last_sprint_name or item.current_sprint_notes or item.last_sprint_outcome or 'No detail recorded.' }}</div>
+                  </div>
+                {% endfor %}
+              {% else %}
+                {% for item in section.items %}
+                  <div class="focus-item d-flex justify-content-between gap-3 align-items-center">
+                    <div>
+                      <div class="fw-semibold">{{ item.label }}</div>
+                      <div class="text-secondary small">Operational queue</div>
+                    </div>
+                    <a class="badge text-bg-light border text-decoration-none" href="{{ item.href }}">{{ item.count }}</a>
+                  </div>
+                {% endfor %}
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
       </div>
     </div>
   </section>

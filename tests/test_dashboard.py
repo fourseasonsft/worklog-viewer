@@ -22,6 +22,7 @@ class WorklogDashboardTests(unittest.TestCase):
     def _make_structure(self) -> None:
         for rel in [
             "00-dashboard",
+            "02-roadmap",
             "01-daily-logs/2026/06",
             "03-active-work",
             "04-inbox/new",
@@ -41,6 +42,47 @@ class WorklogDashboardTests(unittest.TestCase):
         }.items():
             (self.root / "00-dashboard" / name).write_text(body, encoding="utf-8")
         (self.root / "01-daily-logs/2026/06/2026-06-20.md").write_text("# Daily Log - 2026-06-20\n", encoding="utf-8")
+        for name, body in {
+            "platform-roadmap.md": "# Platform Roadmap\n",
+            "core-roadmap.md": "# Core Roadmap\n",
+            "unity-roadmap.md": "# Unity Roadmap\n",
+            "ims-roadmap.md": "\n".join(
+                [
+                    "# IMS Roadmap",
+                    "",
+                    "## Inventory Ownership Model",
+                    "",
+                    "- IMS owns inventory balances.",
+                    "- IMS owns inventory history.",
+                    "- IMS becomes the system of record after inventory is created.",
+                    "",
+                    "## XDock Operational Ownership",
+                    "",
+                    "- XDock owns unloading.",
+                    "- XDock owns loading.",
+                    "- XDock owns floor control.",
+                    "- XDock owns overweight creation.",
+                    "",
+                    "## Inventory Creation Sources",
+                    "",
+                    "- XDock transfer-load workflows eventually create inventory.",
+                    "- Onsite Check-In workflows eventually create inventory.",
+                    "- After creation, IMS is the source of truth for the inventory record.",
+                    "",
+                    "## Future Roadmap",
+                    "",
+                    "- Reservations.",
+                    "- Available vs reserved inventory.",
+                    "- Customer inventory visibility.",
+                    "- Customer-created shipments.",
+                    "",
+                ]
+            ),
+            "dispatch-roadmap.md": "# Dispatch Roadmap\n",
+            "cy-storage-roadmap.md": "# CY Storage Roadmap\n",
+            "parking-roadmap.md": "# Parking Roadmap\n",
+        }.items():
+            (self.root / "02-roadmap" / name).write_text(body, encoding="utf-8")
         active_work_bodies = {
             "core": "# Core Active Work\n\n## Current State\n\n- Core is stable.\n\n## Last Sprint\n\n- Name: Registry alignment\n- Completed: 2026-06-19\n- Outcome: Worklog launch stayed aligned.\n\n## Next Suggested Sprint\n\n- Name: Launch stability watch\n- Why: Keep the assertion path stable.\n- Suggested First Step: Verify launcher payloads.\n\n## Current Sprint / Focus\n\n- Keep Core stable.\n\n## Blockers\n\n- None.\n\n## Last Updated\n\n- 2026-06-20\n",
             "unity": "# Unity Active Work\n\n## Current State\n\n- Unity is stable.\n\n## Last Sprint\n\n- Name: Launcher alignment\n- Completed: 2026-06-19\n- Outcome: Worklog stayed visible.\n\n## Next Suggested Sprint\n\n- Name: Launcher visibility verification\n- Why: Keep Super Admin access working.\n- Suggested First Step: Confirm Worklog launch.\n\n## Current Sprint / Focus\n\n- Keep Unity stable.\n\n## Blockers\n\n- None.\n\n## Last Updated\n\n- 2026-06-20\n",
@@ -77,6 +119,8 @@ class WorklogDashboardTests(unittest.TestCase):
     def test_dashboard_renders_table_and_rows(self) -> None:
         html = self._client().get("/").get_data(as_text=True)
         self.assertIn("dashboard-table", html)
+        self.assertIn("Conductor", html)
+        self.assertIn("Engineering Console", html)
         self.assertIn("dashboard-table-th-rotated", html)
         self.assertIn("App/Product", html)
         self.assertIn("Core", html)
@@ -108,6 +152,36 @@ class WorklogDashboardTests(unittest.TestCase):
         html = self._client().get("/").get_data(as_text=True)
         self.assertIn("Blockers / Notes", html)
         self.assertIn("Next Action", html)
+
+    def test_engineering_console_renders_copyable_commands(self) -> None:
+        html = self._client().get("/engineering-console").get_data(as_text=True)
+        self.assertIn("Read-only engineering operations surface", html)
+        self.assertIn("python scripts/create_sprint.py", html)
+        self.assertIn("python scripts/validation_session.py", html)
+        self.assertIn("Copyable CLI", html)
+
+    def test_navigation_collapses_duplicate_primary_items(self) -> None:
+        nav = viewer_app._nav_items()
+        primary_labels = [item["label"] for item in nav[0]["items"]]
+        self.assertIn("Engineering Console", primary_labels)
+        self.assertNotIn("Updates", primary_labels)
+        self.assertNotIn("Releases", primary_labels)
+        self.assertNotIn("Inbox", primary_labels)
+        more_labels = [item["label"] for item in nav[1]["items"]]
+        self.assertIn("Release Notes", more_labels)
+        self.assertIn("Releases", more_labels)
+        self.assertIn("Inbox", more_labels)
+
+    def test_roadmap_includes_ims_xdock_ownership_model(self) -> None:
+        html = self._client().get("/roadmap").get_data(as_text=True)
+        self.assertIn("IMS Roadmap", html)
+        self.assertIn("IMS owns inventory balances.", html)
+        self.assertIn("IMS owns inventory history.", html)
+        self.assertIn("XDock owns unloading.", html)
+        self.assertIn("XDock owns loading.", html)
+        self.assertIn("XDock transfer-load workflows eventually create inventory.", html)
+        self.assertIn("Onsite Check-In workflows eventually create inventory.", html)
+        self.assertIn("Reservations.", html)
 
 
 if __name__ == "__main__":
