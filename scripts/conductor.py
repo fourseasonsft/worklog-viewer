@@ -13,6 +13,7 @@ from pathlib import Path
 
 DEFAULT_WORKLOG_ROOT = Path("/opt/fsftdev/fsft-worklog")
 COMMAND_LOG_RELATIVE = Path("08-conductor/command-log.jsonl")
+NOTIFICATIONS_RELATIVE = Path("04-inbox/notifications")
 
 
 @dataclass(slots=True)
@@ -65,6 +66,13 @@ def _sprint_files(root: Path) -> list[Path]:
     return sorted([path for path in sprint_root.rglob("*.md") if path.is_file() and path.name != "README.md"], reverse=True)
 
 
+def _request_files(root: Path) -> list[Path]:
+    request_dir = root / "04-inbox" / "requests"
+    if not request_dir.exists():
+        return []
+    return sorted([path for path in request_dir.rglob("*.md") if path.is_file()], reverse=True)
+
+
 def _parse_sprint_record(path: Path) -> dict[str, str]:
     text = _read_text(path)
     meta = _parse_key_values(text)
@@ -79,6 +87,21 @@ def _parse_sprint_record(path: Path) -> dict[str, str]:
     }
 
 
+def _parse_shortcode_request(path: Path) -> dict[str, str]:
+    text = _read_text(path)
+    meta = _parse_key_values(text)
+    title = _first_nonempty_heading(text) or path.stem.replace("-", " ").title()
+    shortcode = meta.get("shortcode") or meta.get("result_shortcode") or meta.get("request_shortcode") or ""
+    return {
+        "path": str(path),
+        "title": title,
+        "request_id": meta.get("request_id") or str(path.relative_to(path.parents[2])),
+        "requester_email": meta.get("requester_email") or "",
+        "shortcode": shortcode.strip(),
+        "text": text,
+    }
+
+
 def _find_sprint(root: Path, code: str) -> dict[str, str] | None:
     normalized = code.strip().lower()
     for path in _sprint_files(root):
@@ -86,6 +109,53 @@ def _find_sprint(root: Path, code: str) -> dict[str, str] | None:
         if record["sprint_code"].strip().lower() == normalized:
             return record
     return None
+
+
+def _find_request_by_shortcode(root: Path, shortcode: str) -> dict[str, str] | None:
+    normalized = shortcode.strip().lower()
+    if not normalized:
+        return None
+    for path in _request_files(root):
+        record = _parse_shortcode_request(path)
+        haystack = "\n".join([record["title"], record["text"], record["request_id"]]).lower()
+        if record["shortcode"].lower() == normalized or normalized in haystack:
+            return record
+    return None
+
+
+def _ensure_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def _write_shortcode_result(root: Path, shortcode: str, request: dict[str, str] | None, result_text: str) -> Path:
+    _ensure_dir(root / NOTIFICATIONS_RELATIVE)
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H%M%S")
+    slug = re.sub(r"[^a-z0-9]+", "-", shortcode.strip().lower()).strip("-") or "shortcode"
+    target = root / NOTIFICATIONS_RELATIVE / f"{timestamp}-shortcode-result-{slug}.md"
+    body_lines = [
+        "# Notification: shortcode_result",
+        "",
+        f"- request_id: {request['request_id'] if request else ''}",
+        f"- request_title: {request['title'] if request else ''}",
+        f"- email: {request['requester_email'] if request else ''}",
+        "- notification_type: shortcode_result",
+        "- status: complete",
+        f"- sent_at: ",
+        f"- generated_at: {datetime.now(timezone.utc).isoformat()}",
+        "- error_message: ",
+        f"- subject: Shortcode result for {shortcode}",
+        f"- idea_path: ",
+        f"- sprint_code: ",
+        f"- sprint_path: ",
+        "",
+        "## Body",
+        f"Shortcode: {shortcode}",
+        f"Result shortcode: {result_text}",
+    ]
+    if request:
+        body_lines.extend(["", f"Source request: {request['path']}"])
+    target.write_text("\n".join(body_lines) + "\n", encoding="utf-8")
+    return target
 
 
 def _report_today(root: Path) -> dict[str, object]:
@@ -222,6 +292,13 @@ def build_parser() -> argparse.ArgumentParser:
     report_sub = report.add_subparsers(dest="report_command", required=True)
     report_today = report_sub.add_parser("today", help="Report today's current state.")
 
+    shortcode = subparsers.add_parser("shortcode", help="Resolve a shortcode and write a result artifact.")
+    shortcode_sub = shortcode.add_subparsers(dest="shortcode_command", required=True)
+    shortcode_resolve = shortcode_sub.add_parser("resolve", help="Resolve a shortcode to a result artifact.")
+    shortcode_resolve.add_argument("shortcode")
+    shortcode_resolve.add_argument("--result", default="RESULT_SHORTCODE")
+    shortcode_resolve.add_argument("--request-id", default="")
+
     return parser
 
 
@@ -248,6 +325,44 @@ def main(argv: list[str] | None = None) -> int:
             payload = _report_today(root)
             payload["summary"] = "Report packet for today"
             _log_command(ctx, "report today", "03-active-work", {}, "report packet generated", [], [])
+            _emit(payload, args.json_mode)
+            return 0
+        if args.command == "shortcode" and args.shortcode_command == "resolve":
+            request = _find_request_by_shortcode(root, args.shortcode)
+            if not request and args.request_id:
+                for candidate in _request_files(root):
+                    record = _parse_shortcode_request(candidate)
+                    if record["request_id"].strip().lower() == args.request_id.strip().lower():
+                        request = record
+                        break
+            result_path = _write_shortcode_result(root, args.shortcode, request, args.result)
+            payload = {
+                "summary": f"Shortcode {args.shortcode} resolved",
+                "current_context": {
+                    "shortcode": args.shortcode,
+                    "request": request["path"] if request else None,
+                    "result_path": str(result_path),
+                },
+                "status": {
+                    "resolved": request is not None,
+                },
+                "what_changed": [
+                    f"Wrote shortcode result artifact at {result_path.relative_to(root)}",
+                ],
+                "open_decisions": [],
+                "risks": [],
+                "next_recommended_actions": [],
+                "exact_question_for_chatgpt": f"What should Conductor do with shortcode {args.shortcode} next?",
+            }
+            _log_command(
+                ctx,
+                f"shortcode resolve {args.shortcode}",
+                str(result_path.relative_to(root)),
+                {"shortcode": args.shortcode, "result": args.result, "request_id": args.request_id},
+                "shortcode result artifact generated",
+                [str(result_path.relative_to(root))],
+                [],
+            )
             _emit(payload, args.json_mode)
             return 0
         parser.error(f"Unsupported command: {args.command}")
