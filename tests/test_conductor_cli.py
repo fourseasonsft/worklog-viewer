@@ -27,6 +27,21 @@ class ConductorCliTests(unittest.TestCase):
             "# Shortcode Test\n\n- request_id: 04-inbox/requests/2026-06-27-shortcode-test.md\n- request_title: Shortcode Test\n- requester_email: david@example.com\n- shortcode: SHORTCODE-ENGINE-001\n",
             encoding="utf-8",
         )
+        (self.root / "07-work-orders").mkdir(parents=True, exist_ok=True)
+        (self.root / "07-work-orders" / "WO-20260627-012-work-order-follow-up-routing.md").write_text(
+            "# WO-20260627-012-work-order-follow-up-routing\n\n"
+            "Status: Requested\n"
+            "Created: 2026-06-28\n"
+            "Requested By: David\n"
+            "Primary App: Worklog\n"
+            "Secondary System: Conductor\n"
+            "Related Codex Shortcode: `/codex:fsft-work-order`\n\n"
+            "## Objective\n\n"
+            "Implement Work Order follow-up routing.\n\n"
+            "## Pending Follow-Ups\n\n"
+            "- Implement the smallest safe routing patch for `#/work-order fu <id>` so a single pending follow-up can be executed automatically.\n",
+            encoding="utf-8",
+        )
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -68,6 +83,22 @@ class ConductorCliTests(unittest.TestCase):
         self.assertIn("shortcode_result", content)
         self.assertIn("RESULT_SHORTCODE", content)
         self.assertIn("SHORTCODE-ENGINE-001", content)
+
+    def test_work_order_fu_routes_single_pending_follow_up(self) -> None:
+        code = conductor.main([
+            "--worklog-root",
+            str(self.root),
+            "--json",
+            "work-order",
+            "fu",
+            "WO-20260627-012-work-order-follow-up-routing",
+        ])
+        self.assertEqual(code, 0)
+        log_path = self.root / "08-conductor" / "command-log.jsonl"
+        self.assertTrue(log_path.exists())
+        entry = json.loads(log_path.read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertEqual(entry["command"], "work-order fu WO-20260627-012-work-order-follow-up-routing")
+        self.assertEqual(entry["approval_status"], "not_required")
 
 
 if __name__ == "__main__":

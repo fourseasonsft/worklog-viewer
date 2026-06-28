@@ -73,6 +73,13 @@ def _request_files(root: Path) -> list[Path]:
     return sorted([path for path in request_dir.rglob("*.md") if path.is_file()], reverse=True)
 
 
+def _work_order_files(root: Path) -> list[Path]:
+    work_order_dir = root / "07-work-orders"
+    if not work_order_dir.exists():
+        return []
+    return sorted([path for path in work_order_dir.glob("*.md") if path.is_file()], reverse=True)
+
+
 def _parse_sprint_record(path: Path) -> dict[str, str]:
     text = _read_text(path)
     meta = _parse_key_values(text)
@@ -102,6 +109,32 @@ def _parse_shortcode_request(path: Path) -> dict[str, str]:
     }
 
 
+def _parse_work_order_packet(path: Path) -> dict[str, object]:
+    text = _read_text(path)
+    meta = _parse_key_values(text)
+    title = _first_nonempty_heading(text) or path.stem.replace("-", " ").title()
+    pending_follow_ups: list[str] = []
+    current_section: str | None = None
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if line.startswith("## "):
+            current_section = line[3:].strip().lower()
+            continue
+        if current_section == "pending follow-ups" and line.startswith("- "):
+            item = line[2:].strip()
+            if item:
+                pending_follow_ups.append(item)
+    return {
+        "path": str(path),
+        "title": title,
+        "work_order_id": meta.get("work order id") or path.stem,
+        "status": meta.get("status") or "",
+        "requested_by": meta.get("requested by") or "",
+        "pending_follow_ups": pending_follow_ups,
+        "text": text,
+    }
+
+
 def _find_sprint(root: Path, code: str) -> dict[str, str] | None:
     normalized = code.strip().lower()
     for path in _sprint_files(root):
@@ -119,6 +152,18 @@ def _find_request_by_shortcode(root: Path, shortcode: str) -> dict[str, str] | N
         record = _parse_shortcode_request(path)
         haystack = "\n".join([record["title"], record["text"], record["request_id"]]).lower()
         if record["shortcode"].lower() == normalized or normalized in haystack:
+            return record
+    return None
+
+
+def _find_work_order(root: Path, work_order_id: str) -> dict[str, object] | None:
+    normalized = work_order_id.strip().lower()
+    if not normalized:
+        return None
+    for path in _work_order_files(root):
+        record = _parse_work_order_packet(path)
+        haystack = "\n".join([record["title"], record["text"], record["work_order_id"]]).lower()
+        if record["work_order_id"].strip().lower() == normalized or normalized in haystack:
             return record
     return None
 
@@ -299,6 +344,11 @@ def build_parser() -> argparse.ArgumentParser:
     shortcode_resolve.add_argument("--result", default="RESULT_SHORTCODE")
     shortcode_resolve.add_argument("--request-id", default="")
 
+    work_order = subparsers.add_parser("work-order", help="Inspect or route a Worklog work order.")
+    work_order_sub = work_order.add_subparsers(dest="work_order_command", required=True)
+    work_order_fu = work_order_sub.add_parser("fu", help="Route a work-order follow-up.")
+    work_order_fu.add_argument("work_order_id")
+
     return parser
 
 
@@ -361,6 +411,50 @@ def main(argv: list[str] | None = None) -> int:
                 {"shortcode": args.shortcode, "result": args.result, "request_id": args.request_id},
                 "shortcode result artifact generated",
                 [str(result_path.relative_to(root))],
+                [],
+            )
+            _emit(payload, args.json_mode)
+            return 0
+        if args.command == "work-order" and args.work_order_command == "fu":
+            work_order = _find_work_order(root, args.work_order_id)
+            if not work_order:
+                raise FileNotFoundError(f"Work order not found: {args.work_order_id}")
+            pending = list(work_order.get("pending_follow_ups") or [])
+            if len(pending) == 1:
+                outcome = "auto_executed"
+                summary = f"Work order {args.work_order_id} routed automatically"
+                next_actions = [f"Execute pending follow-up: {pending[0]}"]
+            elif len(pending) > 1:
+                outcome = "multiple_pending"
+                summary = f"Work order {args.work_order_id} has multiple pending follow-ups"
+                next_actions = pending
+            else:
+                outcome = "complete"
+                summary = f"Work order {args.work_order_id} has no pending follow-ups"
+                next_actions = []
+            payload = {
+                "summary": summary,
+                "current_context": {
+                    "work_order_id": args.work_order_id,
+                    "work_order_path": work_order["path"],
+                },
+                "status": {
+                    "follow_up_count": len(pending),
+                    "outcome": outcome,
+                },
+                "what_changed": [],
+                "open_decisions": [],
+                "risks": [],
+                "next_recommended_actions": next_actions,
+                "exact_question_for_chatgpt": f"What should Conductor do with work order {args.work_order_id} next?",
+            }
+            _log_command(
+                ctx,
+                f"work-order fu {args.work_order_id}",
+                str(work_order["path"]),
+                {"work_order_id": args.work_order_id},
+                summary,
+                [],
                 [],
             )
             _emit(payload, args.json_mode)
