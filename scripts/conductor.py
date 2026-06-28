@@ -91,6 +91,7 @@ def _parse_sprint_record(path: Path) -> dict[str, str]:
         "sprint_code": meta.get("sprint code") or meta.get("sprint_code") or meta.get("code") or path.stem.split("-", 1)[0],
         "status": meta.get("status") or "",
         "app": meta.get("app product") or meta.get("app") or "",
+        "recommended_first_step": meta.get("recommended first step") or meta.get("recommended_first_step") or "",
         "notes": meta.get("notes") or "",
     }
 
@@ -167,6 +168,52 @@ def _find_work_order(root: Path, work_order_id: str) -> dict[str, object] | None
         if record["work_order_id"].strip().lower() == normalized or normalized in haystack:
             return record
     return None
+
+
+def _active_sprint_files(root: Path) -> list[Path]:
+    active_dir = root / "06-sprints" / "active"
+    if not active_dir.exists():
+        return []
+    return sorted([path for path in active_dir.glob("*.md") if path.is_file()], reverse=True)
+
+
+def _seed_follow_up_from_sprint(root: Path, sprint_record: dict[str, str]) -> Path | None:
+    sprint_code = (sprint_record.get("sprint_code") or "").strip()
+    if not sprint_code:
+        return None
+    work_order_path = root / "07-work-orders" / f"{sprint_code}.md"
+    if work_order_path.exists():
+        return work_order_path
+    recommended_first_step = (sprint_record.get("recommended_first_step") or "").strip()
+    if not recommended_first_step:
+        return None
+    work_order_path.parent.mkdir(parents=True, exist_ok=True)
+    body = "\n".join(
+        [
+            f"# {sprint_code}",
+            "",
+            "Status: Requested",
+            f"Created: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
+            f"Requested By: {sprint_record.get('app') or 'Worklog'}",
+            "Primary App: Worklog",
+            "Secondary System: Conductor",
+            "Related Codex Shortcode: `/codex:fsft-work-order`",
+            "",
+            "## Objective",
+            "",
+            recommended_first_step,
+            "",
+            "## Why This Work Order Exists",
+            "",
+            "Sprint activation should seed the next known implementation step as a pending follow-up so `#/work-order fu <SPRINT-ID>` can execute immediately.",
+            "",
+            "## Pending Follow-Ups",
+            "",
+            f"- {recommended_first_step}",
+        ]
+    )
+    _write_atomic_text(work_order_path, body + "\n")
+    return work_order_path
 
 
 def _ensure_dir(path: Path) -> None:
@@ -437,6 +484,10 @@ def build_parser() -> argparse.ArgumentParser:
     work_order_issue.add_argument("--title", required=True)
     work_order_issue.add_argument("--objective", required=True)
 
+    sprint = subparsers.add_parser("sprint", help="Inspect or repair sprint records.")
+    sprint_sub = sprint.add_subparsers(dest="sprint_command", required=True)
+    sprint_repair = sprint_sub.add_parser("repair-followups", help="Seed missing follow-ups for active sprints.")
+
     return parser
 
 
@@ -571,6 +622,39 @@ def main(argv: list[str] | None = None) -> int:
                 {"work_order_id": args.work_order_id, "title": args.title, "objective": args.objective},
                 "work order issued transactionally",
                 [result["issue_path"], result["work_order_path"]],
+                [],
+            )
+            _emit(payload, args.json_mode)
+            return 0
+        if args.command == "sprint" and args.sprint_command == "repair-followups":
+            repaired: list[str] = []
+            for path in _active_sprint_files(root):
+                sprint_record = _parse_sprint_record(path)
+                if _seed_follow_up_from_sprint(root, sprint_record):
+                    repaired.append(str(sprint_record.get("sprint_code") or path.stem))
+            payload = {
+                "summary": "Active sprint follow-up repair complete",
+                "current_context": {
+                    "repaired": repaired,
+                },
+                "status": {
+                    "repaired_count": len(repaired),
+                },
+                "what_changed": [
+                    f"Seeded follow-up work orders for {len(repaired)} active sprint(s).",
+                ],
+                "open_decisions": [],
+                "risks": [],
+                "next_recommended_actions": [],
+                "exact_question_for_chatgpt": "What should Conductor do next after repairing active sprint follow-ups?",
+            }
+            _log_command(
+                ctx,
+                "sprint repair-followups",
+                None,
+                {},
+                "active sprint follow-up repair complete",
+                [],
                 [],
             )
             _emit(payload, args.json_mode)

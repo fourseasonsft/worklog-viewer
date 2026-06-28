@@ -3044,6 +3044,17 @@ def _seed_sprint_follow_up(record_path: Path) -> Path | None:
     return work_order_path
 
 
+def _repair_sprint_follow_ups() -> list[str]:
+    repaired: list[str] = []
+    for record in _sprint_records():
+        if record.get("status_key") != "active":
+            continue
+        record_path = WORKLOG_ROOT / str(record["path"])
+        if _seed_sprint_follow_up(record_path):
+            repaired.append(str(record.get("sprint_code") or record.get("id") or record_path.stem))
+    return repaired
+
+
 def _append_sprint_completion_notes(record_path: Path, notes: str) -> Path:
     text = record_path.read_text(encoding="utf-8")
     if "## Completion Notes" not in text:

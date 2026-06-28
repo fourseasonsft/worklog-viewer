@@ -19,7 +19,7 @@ class ConductorCliTests(unittest.TestCase):
         (self.root / "03-active-work" / "ims.md").write_text("# IMS Active Work\n", encoding="utf-8")
         (self.root / "03-active-work" / "worklog.md").write_text("# Worklog Active Work\n", encoding="utf-8")
         (self.root / "06-sprints" / "active" / "IMS-SPRINT-20260626-002.md").write_text(
-            "# IMS Sprint\n\n- Sprint Code: IMS-SPRINT-20260626-002\n- Status: active\n- App: IMS\n",
+            "# IMS Sprint\n\n- Sprint Code: IMS-SPRINT-20260626-002\n- Status: active\n- App: IMS\n- Recommended First Step: Document the candidate row lifecycle, allowable edits, and Convert Intake boundary before implementation.\n",
             encoding="utf-8",
         )
         (self.root / "04-inbox" / "requests").mkdir(parents=True, exist_ok=True)
@@ -143,6 +143,42 @@ class ConductorCliTests(unittest.TestCase):
         work_order_path = self.root / "07-work-orders" / "WO-20260627-014-work-order-issuance-transaction.md"
         self.assertFalse(issue_path.exists())
         self.assertFalse(work_order_path.exists())
+
+    def test_sprint_repair_followups_seeds_missing_active_follow_up(self) -> None:
+        code = conductor.main([
+            "--worklog-root",
+            str(self.root),
+            "--json",
+            "sprint",
+            "repair-followups",
+        ])
+        self.assertEqual(code, 0)
+        seeded = self.root / "07-work-orders" / "IMS-SPRINT-20260626-002.md"
+        self.assertTrue(seeded.exists())
+        seeded_text = seeded.read_text(encoding="utf-8")
+        self.assertIn("Document the candidate row lifecycle", seeded_text)
+
+    def test_work_order_fu_after_repair_routes_seeded_follow_up(self) -> None:
+        conductor.main([
+            "--worklog-root",
+            str(self.root),
+            "--json",
+            "sprint",
+            "repair-followups",
+        ])
+        code = conductor.main([
+            "--worklog-root",
+            str(self.root),
+            "--json",
+            "work-order",
+            "fu",
+            "IMS-SPRINT-20260626-002",
+        ])
+        self.assertEqual(code, 0)
+        log_path = self.root / "08-conductor" / "command-log.jsonl"
+        entry = json.loads(log_path.read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertEqual(entry["command"], "work-order fu IMS-SPRINT-20260626-002")
+        self.assertEqual(entry["approval_status"], "not_required")
 
 
 if __name__ == "__main__":
