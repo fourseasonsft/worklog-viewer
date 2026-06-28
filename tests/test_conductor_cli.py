@@ -100,6 +100,50 @@ class ConductorCliTests(unittest.TestCase):
         self.assertEqual(entry["command"], "work-order fu WO-20260627-012-work-order-follow-up-routing")
         self.assertEqual(entry["approval_status"], "not_required")
 
+    def test_work_order_issue_creates_issue_and_packet(self) -> None:
+        code = conductor.main([
+            "--worklog-root",
+            str(self.root),
+            "--json",
+            "work-order",
+            "issue",
+            "WO-20260627-014-work-order-issuance-transaction",
+            "--title",
+            "Work Order Issuance Transaction",
+            "--objective",
+            "Implement Work Order issuance transactionally.",
+        ])
+        self.assertEqual(code, 0)
+        issue_path = self.root / "04-inbox" / "requests" / "WO-20260627-014-work-order-issuance-transaction.md"
+        work_order_path = self.root / "07-work-orders" / "WO-20260627-014-work-order-issuance-transaction.md"
+        self.assertTrue(issue_path.exists())
+        self.assertTrue(work_order_path.exists())
+        content = work_order_path.read_text(encoding="utf-8")
+        self.assertIn("Transactional issuance should create both", content)
+        self.assertIn("Work Order ID: WO-20260627-014-work-order-issuance-transaction", issue_path.read_text(encoding="utf-8"))
+
+    def test_work_order_issue_rolls_back_on_partial_failure(self) -> None:
+        original = conductor._work_order_packet_artifact
+
+        def fail_once(root, work_order_id, title, objective):
+            raise RuntimeError("simulated failure")
+
+        conductor._work_order_packet_artifact = fail_once
+        try:
+            with self.assertRaises(RuntimeError):
+                conductor.issue_work_order(
+                    self.root,
+                    "WO-20260627-014-work-order-issuance-transaction",
+                    "Work Order Issuance Transaction",
+                    "Implement Work Order issuance transactionally.",
+                )
+        finally:
+            conductor._work_order_packet_artifact = original
+        issue_path = self.root / "04-inbox" / "requests" / "WO-20260627-014-work-order-issuance-transaction.md"
+        work_order_path = self.root / "07-work-orders" / "WO-20260627-014-work-order-issuance-transaction.md"
+        self.assertFalse(issue_path.exists())
+        self.assertFalse(work_order_path.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

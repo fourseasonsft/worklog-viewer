@@ -14,6 +14,7 @@ from pathlib import Path
 DEFAULT_WORKLOG_ROOT = Path("/opt/fsftdev/fsft-worklog")
 COMMAND_LOG_RELATIVE = Path("08-conductor/command-log.jsonl")
 NOTIFICATIONS_RELATIVE = Path("04-inbox/notifications")
+ISSUES_RELATIVE = Path("04-inbox/requests")
 
 
 @dataclass(slots=True)
@@ -203,6 +204,89 @@ def _write_shortcode_result(root: Path, shortcode: str, request: dict[str, str] 
     return target
 
 
+def _write_atomic_text(path: Path, content: str) -> None:
+    _ensure_dir(path.parent)
+    tmp_path = path.with_name(f".{path.name}.tmp")
+    try:
+        tmp_path.write_text(content, encoding="utf-8")
+        tmp_path.replace(path)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+
+def _work_order_issue_artifact(root: Path, work_order_id: str, title: str, objective: str) -> Path:
+    target = root / ISSUES_RELATIVE / f"{work_order_id}.md"
+    body = "\n".join(
+        [
+            f"# GitHub Issue: {title}",
+            "",
+            f"- issue_id: {work_order_id}",
+            "- issue_type: work_order_issuance",
+            "- status: open",
+            f"- work_order_id: {work_order_id}",
+            f"- objective: {objective}",
+            "",
+            "## Body",
+            f"Work Order ID: {work_order_id}",
+            f"Objective: {objective}",
+        ]
+    )
+    _write_atomic_text(target, body + "\n")
+    return target
+
+
+def _work_order_packet_artifact(root: Path, work_order_id: str, title: str, objective: str) -> Path:
+    target = root / "07-work-orders" / f"{work_order_id}.md"
+    body = "\n".join(
+        [
+            f"# {work_order_id}",
+            "",
+            "Status: Requested",
+            f"Created: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
+            "Requested By: David",
+            "Primary App: Worklog",
+            "Secondary System: Conductor",
+            "Related Codex Shortcode: `/codex:fsft-work-order`",
+            "",
+            "## Objective",
+            "",
+            objective,
+            "",
+            "## Why This Work Order Exists",
+            "",
+            "Transactional issuance should create both the GitHub Issue and the Git-backed Work Order packet, or fail with no partial state.",
+            "",
+            "## Completion Criteria",
+            "",
+            "- The GitHub Issue exists.",
+            "- The Git-backed Work Order packet exists.",
+            "- `#/work-order <WO-ID>` resolves immediately after issuance.",
+        ]
+    )
+    _write_atomic_text(target, body + "\n")
+    return target
+
+
+def issue_work_order(root: Path, work_order_id: str, title: str, objective: str) -> dict[str, object]:
+    issue_path: Path | None = None
+    work_order_path: Path | None = None
+    try:
+        issue_path = _work_order_issue_artifact(root, work_order_id, title, objective)
+        work_order_path = _work_order_packet_artifact(root, work_order_id, title, objective)
+    except Exception:
+        if issue_path and issue_path.exists():
+            issue_path.unlink()
+        if work_order_path and work_order_path.exists():
+            work_order_path.unlink()
+        raise
+    return {
+        "work_order_id": work_order_id,
+        "issue_path": str(issue_path.relative_to(root)),
+        "work_order_path": str(work_order_path.relative_to(root)),
+    }
+
+
 def _report_today(root: Path) -> dict[str, object]:
     active_files = _active_work_files(root)
     current_focus_path = _current_focus_file(root)
@@ -348,6 +432,10 @@ def build_parser() -> argparse.ArgumentParser:
     work_order_sub = work_order.add_subparsers(dest="work_order_command", required=True)
     work_order_fu = work_order_sub.add_parser("fu", help="Route a work-order follow-up.")
     work_order_fu.add_argument("work_order_id")
+    work_order_issue = work_order_sub.add_parser("issue", help="Issue a new work order transactionally.")
+    work_order_issue.add_argument("work_order_id")
+    work_order_issue.add_argument("--title", required=True)
+    work_order_issue.add_argument("--objective", required=True)
 
     return parser
 
@@ -455,6 +543,34 @@ def main(argv: list[str] | None = None) -> int:
                 {"work_order_id": args.work_order_id},
                 summary,
                 [],
+                [],
+            )
+            _emit(payload, args.json_mode)
+            return 0
+        if args.command == "work-order" and args.work_order_command == "issue":
+            result = issue_work_order(root, args.work_order_id, args.title, args.objective)
+            payload = {
+                "summary": f"Work order {args.work_order_id} issued",
+                "current_context": result,
+                "status": {
+                    "issued": True,
+                },
+                "what_changed": [
+                    f"Created {result['issue_path']}",
+                    f"Created {result['work_order_path']}",
+                ],
+                "open_decisions": [],
+                "risks": [],
+                "next_recommended_actions": [],
+                "exact_question_for_chatgpt": f"What should Conductor do with work order {args.work_order_id} next?",
+            }
+            _log_command(
+                ctx,
+                f"work-order issue {args.work_order_id}",
+                result["work_order_path"],
+                {"work_order_id": args.work_order_id, "title": args.title, "objective": args.objective},
+                "work order issued transactionally",
+                [result["issue_path"], result["work_order_path"]],
                 [],
             )
             _emit(payload, args.json_mode)
