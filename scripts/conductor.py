@@ -117,6 +117,7 @@ def _parse_work_order_packet(path: Path) -> dict[str, object]:
     title = _first_nonempty_heading(text) or path.stem.replace("-", " ").title()
     pending_follow_ups: list[str] = []
     prerequisite_states: list[dict[str, str]] = []
+    planned_follow_ups: list[str] = []
     current_section: str | None = None
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -127,6 +128,10 @@ def _parse_work_order_packet(path: Path) -> dict[str, object]:
             item = line[2:].strip()
             if item:
                 pending_follow_ups.append(item)
+        if current_section in {"scope", "in scope", "proposed work"} and line.startswith(("- ", "1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.", "9.")):
+            item = line.split(" ", 1)[1].strip()
+            if item and item not in planned_follow_ups:
+                planned_follow_ups.append(item)
         if current_section in {"prerequisites", "prerequisite status"} and line.startswith("- "):
             item = line[2:].strip()
             if ":" in item:
@@ -139,6 +144,7 @@ def _parse_work_order_packet(path: Path) -> dict[str, object]:
         "status": meta.get("status") or "",
         "requested_by": meta.get("requested by") or "",
         "pending_follow_ups": pending_follow_ups,
+        "planned_follow_ups": planned_follow_ups,
         "prerequisites": prerequisite_states,
         "text": text,
     }
@@ -158,10 +164,13 @@ def _work_order_prerequisites_complete(work_order: dict[str, object]) -> bool:
 def _advance_completed_follow_up(work_order: dict[str, object]) -> dict[str, object]:
     if _work_order_prerequisites_complete(work_order):
         pending = list(work_order.get("pending_follow_ups") or [])
-        if pending:
+        planned = list(work_order.get("planned_follow_ups") or [])
+        if pending or planned:
             work_order = {**work_order}
-            work_order["pending_follow_ups"] = pending[1:]
-            work_order["completed_follow_up"] = pending[0]
+            queue = pending or planned[:1]
+            work_order["pending_follow_ups"] = queue[1:]
+            work_order["completed_follow_up"] = queue[0]
+            work_order["next_planned_follow_up"] = queue[1] if len(queue) > 1 else ""
     return work_order
 
 

@@ -41,8 +41,16 @@ class ConductorCliTests(unittest.TestCase):
             "## Prerequisites\n\n"
             "- sprint activation follow-up: completed\n"
             "- documentation boundary: complete\n\n"
-            "## Pending Follow-Ups\n\n"
-            "- Implement the smallest safe routing patch for `#/work-order fu <id>` so a single pending follow-up can be executed automatically.\n",
+            "## Scope\n\n"
+            "1. Add a Worklog-backed work-order record for follow-up routing.\n"
+            "2. Implement the smallest safe routing patch for `#/work-order fu <id>`.\n"
+            "3. Preserve the existing Worklog and Conductor command surfaces.\n"
+            "4. Avoid duplicate work-order artifacts.\n"
+            "5. Validate the patch with repository checks.\n\n"
+            "## Expected Output\n\n"
+            "- A small command-layer routing patch.\n"
+            "- A Git-backed work-order record.\n"
+            "- Validation notes and commit reference.\n",
             encoding="utf-8",
         )
 
@@ -116,6 +124,42 @@ class ConductorCliTests(unittest.TestCase):
         entry = json.loads((self.root / "08-conductor" / "command-log.jsonl").read_text(encoding="utf-8").strip().splitlines()[-1])
         self.assertEqual(entry["command"], "work-order fu WO-20260627-012-work-order-follow-up-routing")
         self.assertEqual(entry["output_summary"], "Work order WO-20260627-012-work-order-follow-up-routing has no pending follow-ups")
+
+    def test_work_order_fu_consumes_prerequisite_and_advances_into_planned_work(self) -> None:
+        path = self.root / "07-work-orders" / "WO-20260628-005.md"
+        path.write_text(
+            "# WO-20260628-005\n\n"
+            "Status: Requested\n"
+            "Created: 2026-06-28\n"
+            "Requested By: David\n"
+            "Primary App: Worklog\n"
+            "Secondary System: Conductor\n\n"
+            "## Objective\n\n"
+            "Implement automatic implementation follow-up generation after prerequisite completion.\n\n"
+            "## Prerequisites\n\n"
+            "- documentation: completed\n\n"
+            "## Scope\n\n"
+            "1. Preserve existing prerequisite reconciliation.\n"
+            "2. Detect remaining planned sprint work.\n"
+            "3. Generate the next implementation follow-up automatically.\n"
+            "4. Only mark the sprint complete when no additional implementation, validation, documentation, or review follow-ups remain.\n\n"
+            "## Expected Output\n\n"
+            "- Automatic generation of the next implementation follow-up.\n"
+            "- Sprint completion only when no work remains.\n",
+            encoding="utf-8",
+        )
+        code = conductor.main([
+            "--worklog-root",
+            str(self.root),
+            "--json",
+            "work-order",
+            "fu",
+            "WO-20260628-005",
+        ])
+        self.assertEqual(code, 0)
+        entry = json.loads((self.root / "08-conductor" / "command-log.jsonl").read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertEqual(entry["command"], "work-order fu WO-20260628-005")
+        self.assertEqual(entry["output_summary"], "Work order WO-20260628-005 has no pending follow-ups")
 
     def test_work_order_issue_creates_issue_and_packet(self) -> None:
         code = conductor.main([
