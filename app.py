@@ -2996,6 +2996,54 @@ def _update_sprint_record(record_path: Path, status: str) -> Path:
     return new_path
 
 
+def _seed_sprint_follow_up(record_path: Path) -> Path | None:
+    if not record_path.exists():
+        return None
+    record = _parse_sprint_record(record_path)
+    sprint_code = str(record.get("sprint_code") or "").strip()
+    if not sprint_code:
+        return None
+    recommended_first_step = str(record.get("recommended_first_step") or "").strip()
+    if not recommended_first_step:
+        return None
+    work_order_path = WORKLOG_ROOT / "07-work-orders" / f"{sprint_code}.md"
+    if work_order_path.exists():
+        return work_order_path
+    work_order_path.parent.mkdir(parents=True, exist_ok=True)
+    title = str(record.get("title") or record.get("sprint_group_name") or sprint_code).strip() or sprint_code
+    body = "\n".join(
+        [
+            f"# {sprint_code}",
+            "",
+            "Status: Requested",
+            f"Created: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
+            f"Requested By: {record.get('app_product') or 'Worklog'}",
+            "Primary App: Worklog",
+            "Secondary System: Conductor",
+            "Related Codex Shortcode: `/codex:fsft-work-order`",
+            "",
+            "## Objective",
+            "",
+            recommended_first_step,
+            "",
+            "## Why This Work Order Exists",
+            "",
+            "Sprint activation should seed the next known implementation step as a pending follow-up so `#/work-order fu <SPRINT-ID>` can execute immediately.",
+            "",
+            "## Pending Follow-Ups",
+            "",
+            f"- {recommended_first_step}",
+            "",
+            "## Completion Criteria",
+            "",
+            "- The seeded follow-up exists in Git.",
+            "- `#/work-order fu <SPRINT-ID>` resolves immediately after activation.",
+        ]
+    )
+    work_order_path.write_text(body + "\n", encoding="utf-8")
+    return work_order_path
+
+
 def _append_sprint_completion_notes(record_path: Path, notes: str) -> Path:
     text = record_path.read_text(encoding="utf-8")
     if "## Completion Notes" not in text:
@@ -4550,6 +4598,9 @@ def sprint_action(sprint_id: str):
     record_path = WORKLOG_ROOT / str(record["path"])
     if action == "start":
         new_path = _update_sprint_record(record_path, "active")
+        seeded_follow_up = _seed_sprint_follow_up(new_path)
+        if seeded_follow_up:
+            flash("Sprint follow-up seeded for immediate routing.", "success")
     elif action == "complete":
         should_flash_release_notes = not str(record.get("internal_release_notes") or "").strip() or not str(record.get("plain_english_release_notes") or "").strip()
         new_path = _update_sprint_record(record_path, "completed")
@@ -4639,6 +4690,9 @@ def sprint_action_by_code(sprint_code: str):
     record_path = WORKLOG_ROOT / str(record["path"])
     if action == "start":
         record_path = _update_sprint_record(record_path, "active")
+        seeded_follow_up = _seed_sprint_follow_up(record_path)
+        if seeded_follow_up:
+            flash("Sprint follow-up seeded for immediate routing.", "success")
     elif action == "complete":
         should_flash_release_notes = not str(record.get("internal_release_notes") or "").strip() or not str(record.get("plain_english_release_notes") or "").strip()
         record_path = _update_sprint_record(record_path, "completed")

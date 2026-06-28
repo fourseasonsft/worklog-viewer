@@ -82,7 +82,13 @@ class WorklogSprintQueueTests(unittest.TestCase):
         path.write_text(body, encoding="utf-8")
         return path
 
-    def _create_sprint_record(self, status: str, app_product: str = "IMS", title: str = "IMS Sprint") -> Path:
+    def _create_sprint_record(
+        self,
+        status: str,
+        app_product: str = "IMS",
+        title: str = "IMS Sprint",
+        recommended_first_step: str = "Review the source ideas.",
+    ) -> Path:
         sprint_code = f"{viewer_app._sprint_code_prefix(app_product)}-SPRINT-20260620-001"
         path = self.root / f"06-sprints/{status}/sp-20260620120000-{status}-{title.lower().replace(' ', '-')}.md"
         path.write_text(
@@ -98,6 +104,7 @@ class WorklogSprintQueueTests(unittest.TestCase):
                     "- idea_count: 2",
                     "- created_at: 2026-06-20T12:00:00Z",
                     "- updated_at: 2026-06-20T12:30:00Z",
+                    f"- recommended_first_step: {recommended_first_step}",
                     "- handoff_path: 05-sprint-handoffs/2026-06-20-120000-ims-sprint.md",
                     "",
                     "## Source Ideas",
@@ -592,6 +599,9 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("Active", response.get_data(as_text=True))
         active_path = self.root / "06-sprints/active/sp-20260620120000-approved-ims-sprint.md"
         self.assertTrue(active_path.exists())
+        seeded_follow_up = self.root / "07-work-orders/IMS-SPRINT-20260620-001.md"
+        self.assertTrue(seeded_follow_up.exists())
+        self.assertIn("## Pending Follow-Ups", seeded_follow_up.read_text(encoding="utf-8"))
         client.post("/sprints/sp-20260620120000-approved/action", data={"action": "complete"}, follow_redirects=True)
         completed_path = self.root / "06-sprints/completed/sp-20260620120000-approved-ims-sprint.md"
         self.assertTrue(completed_path.exists())
@@ -636,6 +646,38 @@ class WorklogSprintQueueTests(unittest.TestCase):
         self.assertIn("Draft release notes generated. Please review before shipping.", response.get_data(as_text=True))
         record = viewer_app._sprint_record_by_id("sp-20260620120000-approved")
         self.assertEqual(record["status_key"], "completed")
+
+    def test_start_action_seeds_follow_up_for_fu_routing(self) -> None:
+        self._create_sprint_record(
+            "approved",
+            title="IMS Candidate Management",
+            recommended_first_step="Document the candidate row lifecycle.",
+        )
+        client = self._client()
+        response = client.post("/sprints/sp-20260620120000-approved/action", data={"action": "start"}, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        seeded_follow_up = self.root / "07-work-orders/IMS-SPRINT-20260620-001.md"
+        self.assertTrue(seeded_follow_up.exists())
+        seeded_text = seeded_follow_up.read_text(encoding="utf-8")
+        self.assertIn("Document the candidate row lifecycle.", seeded_text)
+        fu_response = subprocess.run(
+            [
+                "python3",
+                str(Path(viewer_app.__file__).resolve().parent / "scripts" / "conductor.py"),
+                "--worklog-root",
+                str(self.root),
+                "--json",
+                "work-order",
+                "fu",
+                "IMS-SPRINT-20260620-001",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        payload = json.loads(fu_response.stdout.strip())
+        self.assertEqual(payload["status"]["outcome"], "auto_executed")
+        self.assertIn("Document the candidate row lifecycle.", payload["next_recommended_actions"][0])
 
     def test_shared_completed_status_update_backfills_release_notes(self) -> None:
         path = self._create_sprint_record("approved", title="Worklog Sprint", app_product="Worklog")
