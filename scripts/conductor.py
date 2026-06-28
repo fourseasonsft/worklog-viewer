@@ -116,6 +116,7 @@ def _parse_work_order_packet(path: Path) -> dict[str, object]:
     meta = _parse_key_values(text)
     title = _first_nonempty_heading(text) or path.stem.replace("-", " ").title()
     pending_follow_ups: list[str] = []
+    prerequisite_states: list[dict[str, str]] = []
     current_section: str | None = None
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -126,6 +127,11 @@ def _parse_work_order_packet(path: Path) -> dict[str, object]:
             item = line[2:].strip()
             if item:
                 pending_follow_ups.append(item)
+        if current_section in {"prerequisites", "prerequisite status"} and line.startswith("- "):
+            item = line[2:].strip()
+            if ":" in item:
+                key, value = item.split(":", 1)
+                prerequisite_states.append({"name": key.strip(), "state": value.strip()})
     return {
         "path": str(path),
         "title": title,
@@ -133,8 +139,30 @@ def _parse_work_order_packet(path: Path) -> dict[str, object]:
         "status": meta.get("status") or "",
         "requested_by": meta.get("requested by") or "",
         "pending_follow_ups": pending_follow_ups,
+        "prerequisites": prerequisite_states,
         "text": text,
     }
+
+
+def _work_order_prerequisites_complete(work_order: dict[str, object]) -> bool:
+    prerequisites = work_order.get("prerequisites") or []
+    if not prerequisites:
+        return True
+    for prerequisite in prerequisites:
+        state = str(prerequisite.get("state") or "").strip().lower()
+        if state not in {"complete", "completed", "done", "resolved", "closed"}:
+            return False
+    return True
+
+
+def _advance_completed_follow_up(work_order: dict[str, object]) -> dict[str, object]:
+    if _work_order_prerequisites_complete(work_order):
+        pending = list(work_order.get("pending_follow_ups") or [])
+        if pending:
+            work_order = {**work_order}
+            work_order["pending_follow_ups"] = pending[1:]
+            work_order["completed_follow_up"] = pending[0]
+    return work_order
 
 
 def _find_sprint(root: Path, code: str) -> dict[str, str] | None:
@@ -166,7 +194,7 @@ def _find_work_order(root: Path, work_order_id: str) -> dict[str, object] | None
         record = _parse_work_order_packet(path)
         haystack = "\n".join([record["title"], record["text"], record["work_order_id"]]).lower()
         if record["work_order_id"].strip().lower() == normalized or normalized in haystack:
-            return record
+            return _advance_completed_follow_up(record)
     return None
 
 
@@ -558,6 +586,7 @@ def main(argv: list[str] | None = None) -> int:
             work_order = _find_work_order(root, args.work_order_id)
             if not work_order:
                 raise FileNotFoundError(f"Work order not found: {args.work_order_id}")
+            work_order = _advance_completed_follow_up(work_order)
             pending = list(work_order.get("pending_follow_ups") or [])
             if len(pending) == 1:
                 outcome = "auto_executed"
