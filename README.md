@@ -6,6 +6,7 @@ Read-only Flask viewer for the FSFT worklog markdown repository.
 
 - KB = how the platform works
 - Worklog = what we did, what is next, bugs, features, support issues, and where we left off
+- Inbox = the active command transport between ChatGPT and Codex
 - Codex should update the Worklog after meaningful work
 - Codex should update the KB only when architecture, runbooks, infrastructure, auth, deployment, or business rules change
 - Worklog is protected by Core/Unity SSO and restricted to Super Admin users only
@@ -18,6 +19,14 @@ Read-only Flask viewer for the FSFT worklog markdown repository.
 - The viewer is read-only but contains internal project information and must be protected before broad external exposure
 - The long-term protection model is Core/Unity SSO, not a local Worklog login or separate identity system
 - The dashboard is a daily command center with summary cards, top-priority docs, app status summaries, and recent inbox items
+
+## Inbox Transport
+
+- Inbox items are the active command queue.
+- GitHub Issues are planning, discussion, and traceability.
+- Worklog is engineering memory.
+- KB is doctrine.
+- Use `#/inbox <instruction-id>` to route a specific command packet through the Inbox transport.
 
 ## Content Root
 
