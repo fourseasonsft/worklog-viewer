@@ -1076,9 +1076,12 @@ def _parse_structured_inbox_item(path: Path) -> dict[str, str]:
 
 def _dashboard_counts() -> dict[str, int]:
     active_work_count = len(ACTIVE_WORK_FILES)
-    blockers = _count_meaningful_bullets(_read_markdown("00-dashboard/blockers.md"))
+    blockers_path = WORKLOG_ROOT / "00-dashboard/blockers.md"
+    blockers = _count_meaningful_bullets(blockers_path.read_text(encoding="utf-8")) if blockers_path.exists() else 0
     for item in ACTIVE_WORK_FILES:
         source_path = WORKLOG_ROOT / item["path"]
+        if not source_path.exists():
+            continue
         text = source_path.read_text(encoding="utf-8")
         blockers += _count_meaningful_bullets(_extract_section_text(text, "Blockers"))
     return {
@@ -4204,7 +4207,7 @@ def dashboard():
         {
             "title": "Operational Queues",
             "items": [
-                {"label": "Idea Inventory", "count": counts.active_applications, "href": url_for("assistant")},
+                {"label": "Idea Inventory", "count": counts["active_applications"], "href": url_for("assistant")},
                 {"label": "Sprint Queue", "count": len(_sprint_records()), "href": url_for("sprints")},
                 {"label": "Validation Sessions", "count": len(_validation_session_records()), "href": url_for("validation_sessions")},
             ],

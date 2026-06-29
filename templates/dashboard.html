@@ -77,15 +77,15 @@
           <div class="col-12 col-xl-6">
             <div class="priority-card h-100">
               <div class="text-uppercase text-secondary small fw-semibold mb-2">{{ section.title }}</div>
-              {% if section.items and section.items[0].get('title') %}
-                {% for item in section.items %}
+              {% if section['items'] and section['items'][0].get('title') %}
+                {% for item in section['items'] %}
                   <div class="focus-item">
                     <div class="fw-semibold">{{ item.title }}</div>
                     <div class="text-secondary small">{{ item.current_sprint_name or item.last_sprint_name or item.current_sprint_notes or item.last_sprint_outcome or 'No detail recorded.' }}</div>
                   </div>
                 {% endfor %}
               {% else %}
-                {% for item in section.items %}
+                {% for item in section['items'] %}
                   <div class="focus-item d-flex justify-content-between gap-3 align-items-center">
                     <div>
                       <div class="fw-semibold">{{ item.label }}</div>
