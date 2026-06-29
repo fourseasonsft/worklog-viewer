@@ -41,6 +41,20 @@ class ConductorCliTests(unittest.TestCase):
             "Target Repos: fourseasonsft/worklog-viewer, fourseasonsft/fsft-worklog\n",
             encoding="utf-8",
         )
+        (self.root / "04-inbox" / "requests" / "issue-10.md").write_text(
+            "# GitHub Issue: IMS-SPRINT-20260628-002: Validate Intake Candidate Lifecycle\n\n"
+            "- issue_id: 10\n"
+            "- issue_type: work_order_issuance\n"
+            "- status: open\n"
+            "- work_order_id: IMS-SPRINT-20260628-002\n"
+            "- objective: Validate Intake Candidate Lifecycle using the documented candidate lifecycle before implementation.\n"
+            "- target_repos: fourseasonsft/worklog-viewer, fourseasonsft/fsft-worklog\n\n"
+            "## Body\n"
+            "Work Order ID: IMS-SPRINT-20260628-002\n"
+            "Objective: Validate Intake Candidate Lifecycle using the documented candidate lifecycle before implementation.\n"
+            "Target Repos: fourseasonsft/worklog-viewer, fourseasonsft/fsft-worklog\n",
+            encoding="utf-8",
+        )
         (self.root / "07-work-orders").mkdir(parents=True, exist_ok=True)
         (self.root / "07-work-orders" / "WO-20260627-012-work-order-follow-up-routing.md").write_text(
             "# WO-20260627-012-work-order-follow-up-routing\n\n"
@@ -204,6 +218,25 @@ class ConductorCliTests(unittest.TestCase):
             "WO-DOES-NOT-EXIST",
         ])
         self.assertEqual(code, 1)
+
+    def test_work_order_issue_hydrates_from_issue_title(self) -> None:
+        code = conductor.main([
+            "--worklog-root",
+            str(self.root),
+            "--json",
+            "work-order",
+            "issue",
+            "IMS-SPRINT-20260628-002",
+        ])
+        self.assertEqual(code, 0)
+        issue_path = self.root / "04-inbox" / "requests" / "IMS-SPRINT-20260628-002.md"
+        work_order_path = self.root / "07-work-orders" / "IMS-SPRINT-20260628-002.md"
+        self.assertTrue(issue_path.exists())
+        self.assertTrue(work_order_path.exists())
+        issue_text = issue_path.read_text(encoding="utf-8")
+        work_order_text = work_order_path.read_text(encoding="utf-8")
+        self.assertIn("IMS-SPRINT-20260628-002: Validate Intake Candidate Lifecycle", issue_text)
+        self.assertIn("Validate Intake Candidate Lifecycle using the documented candidate lifecycle before implementation.", work_order_text)
 
     def test_work_order_issue_rolls_back_on_partial_failure(self) -> None:
         original = conductor._work_order_packet_artifact

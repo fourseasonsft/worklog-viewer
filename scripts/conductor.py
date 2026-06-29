@@ -136,15 +136,24 @@ def _parse_issue_metadata(text: str) -> dict[str, str]:
 
 
 def _find_issue_request(root: Path, work_order_id: str) -> dict[str, str] | None:
-    request_path = root / ISSUES_RELATIVE / f"{work_order_id}.md"
-    if not request_path.exists():
-        return None
-    text = _read_text(request_path)
-    issue_meta = _parse_issue_metadata(text)
-    issue_meta["path"] = str(request_path)
-    issue_meta["text"] = text
-    issue_meta["work_order_id"] = work_order_id
-    return issue_meta
+    normalized = work_order_id.strip().lower()
+    for request_path in _request_files(root):
+        text = _read_text(request_path)
+        issue_meta = _parse_issue_metadata(text)
+        title = issue_meta.get("title", "")
+        body_haystack = "\n".join([text, title]).lower()
+        metadata_haystack = "\n".join([
+            request_path.stem.lower(),
+            issue_meta.get("work_order_id", "").lower(),
+            issue_meta.get("objective", "").lower(),
+            issue_meta.get("target_repos", "").lower(),
+        ])
+        if normalized in body_haystack or normalized in metadata_haystack:
+            issue_meta["path"] = str(request_path)
+            issue_meta["text"] = text
+            issue_meta["work_order_id"] = issue_meta.get("work_order_id") or work_order_id
+            return issue_meta
+    return None
 
 
 def _parse_issue_title(text: str) -> str:
