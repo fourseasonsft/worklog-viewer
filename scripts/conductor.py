@@ -156,6 +156,22 @@ def _find_issue_request(root: Path, work_order_id: str) -> dict[str, str] | None
     return None
 
 
+def _find_issue_request_by_title_or_objective(root: Path, text: str) -> dict[str, str] | None:
+    haystack = text.strip().lower()
+    if not haystack:
+        return None
+    for request_path in _request_files(root):
+        issue_meta = _parse_issue_metadata(_read_text(request_path))
+        request_text = _read_text(request_path).lower()
+        request_title = issue_meta.get("title", "").lower()
+        if haystack in request_text or (request_title and haystack in request_title):
+            issue_meta["path"] = str(request_path)
+            issue_meta["text"] = _read_text(request_path)
+            issue_meta["work_order_id"] = issue_meta.get("work_order_id") or request_path.stem
+            return issue_meta
+    return None
+
+
 def _parse_issue_title(text: str) -> str:
     match = re.search(r"^#\s+GitHub Issue:\s*(.+)$", text, flags=re.M)
     if match:
@@ -199,6 +215,82 @@ def _parse_work_order_packet(path: Path) -> dict[str, object]:
         "planned_follow_ups": planned_follow_ups,
         "prerequisites": prerequisite_states,
         "text": text,
+    }
+
+
+def _find_work_order_request_record(root: Path, work_order_id: str) -> dict[str, object] | None:
+    request = _find_issue_request(root, work_order_id)
+    if request:
+        return {
+            "source": "request",
+            "title": request.get("title", ""),
+            "objective": request.get("objective", ""),
+            "target_repos": request.get("target_repos", ""),
+            "path": request.get("path", ""),
+            "text": request.get("text", ""),
+            "work_order_id": request.get("work_order_id", work_order_id),
+        }
+    work_order = _find_work_order(root, work_order_id)
+    if work_order:
+        return {
+            "source": "work_order",
+            "title": work_order.get("title", ""),
+            "objective": _read_text(Path(str(work_order["path"]))).split("## Objective", 1)[-1].strip(),
+            "target_repos": "",
+            "path": work_order.get("path", ""),
+            "text": work_order.get("text", ""),
+            "work_order_id": work_order.get("work_order_id", work_order_id),
+        }
+    sprint = _find_sprint(root, work_order_id)
+    if sprint:
+        return {
+            "source": "sprint",
+            "title": sprint.get("title", ""),
+            "objective": sprint.get("recommended_first_step", ""),
+            "target_repos": "",
+            "path": sprint.get("path", ""),
+            "text": _read_text(Path(str(sprint["path"]))),
+            "work_order_id": work_order_id,
+        }
+    active_work = _current_focus_file(root)
+    if active_work:
+        return {
+            "source": "active_work",
+            "title": _first_nonempty_heading(_read_text(active_work)),
+            "objective": "",
+            "target_repos": "",
+            "path": str(active_work),
+            "text": _read_text(active_work),
+            "work_order_id": work_order_id,
+        }
+    return None
+
+
+def _resolve_work_order_preflight(root: Path, work_order_id: str) -> dict[str, object]:
+    request = _find_work_order_request_record(root, work_order_id)
+    if request:
+        objective = str(request.get("objective") or "").strip()
+        title = str(request.get("title") or "").strip()
+        target_repos = _normalize_repo_list(str(request.get("target_repos") or ""))
+        if title and objective:
+            return {
+                "status": "READY",
+                "title": title,
+                "objective": objective,
+                "target_repos": target_repos,
+                "source": request.get("source"),
+            }
+        if title or objective or target_repos:
+            return {
+                "status": "REPAIRED_AND_READY",
+                "title": title,
+                "objective": objective,
+                "target_repos": target_repos,
+                "source": request.get("source"),
+            }
+    return {
+        "status": "BLOCKED_WITH_REASON",
+        "reason": f"Matching GitHub issue not found for work order {work_order_id}",
     }
 
 
@@ -659,9 +751,10 @@ def main(argv: list[str] | None = None) -> int:
             _emit(payload, args.json_mode)
             return 0
         if args.command == "work-order" and args.work_order_command == "fu":
+            preflight = _resolve_work_order_preflight(root, args.work_order_id)
             work_order = _find_work_order(root, args.work_order_id)
             if not work_order:
-                raise FileNotFoundError(f"Work order not found: {args.work_order_id}")
+                raise FileNotFoundError(f"{preflight.get('reason') or f'Work order not found: {args.work_order_id}'}")
             work_order = _advance_completed_follow_up(work_order)
             pending = list(work_order.get("pending_follow_ups") or [])
             if len(pending) == 1:
@@ -681,6 +774,7 @@ def main(argv: list[str] | None = None) -> int:
                 "current_context": {
                     "work_order_id": args.work_order_id,
                     "work_order_path": work_order["path"],
+                    "preflight_status": preflight.get("status"),
                 },
                 "status": {
                     "follow_up_count": len(pending),
@@ -704,25 +798,19 @@ def main(argv: list[str] | None = None) -> int:
             _emit(payload, args.json_mode)
             return 0
         if args.command == "work-order" and args.work_order_command == "issue":
-            issue_request = _find_issue_request(root, args.work_order_id)
-            title = args.title or (issue_request["title"] if issue_request else "")
-            objective = args.objective or (issue_request["objective"] if issue_request else "")
-            target_repos = _normalize_repo_list(args.target_repos) if args.target_repos else []
-            if issue_request:
-                if not title:
-                    title = _parse_issue_title(issue_request["text"]) or issue_request["title"]
-                if not objective:
-                    objective = issue_request["objective"]
-                if not target_repos and issue_request.get("target_repos"):
-                    target_repos = _normalize_repo_list(issue_request["target_repos"])
+            preflight = _resolve_work_order_preflight(root, args.work_order_id)
+            title = args.title or (preflight.get("title") if preflight.get("status") != "BLOCKED_WITH_REASON" else "")
+            objective = args.objective or (preflight.get("objective") if preflight.get("status") != "BLOCKED_WITH_REASON" else "")
+            target_repos = _normalize_repo_list(args.target_repos) if args.target_repos else list(preflight.get("target_repos") or [])
             if not title or not objective:
-                raise FileNotFoundError(f"Matching GitHub issue not found for work order {args.work_order_id}")
+                raise FileNotFoundError(str(preflight.get("reason") or f"Matching GitHub issue not found for work order {args.work_order_id}"))
             result = issue_work_order(root, args.work_order_id, title, objective, target_repos or None)
             payload = {
                 "summary": f"Work order {args.work_order_id} issued",
                 "current_context": result,
                 "status": {
                     "issued": True,
+                    "preflight_status": preflight.get("status"),
                 },
                 "what_changed": [
                     f"Created {result['issue_path']}",

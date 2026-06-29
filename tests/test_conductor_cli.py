@@ -238,6 +238,17 @@ class ConductorCliTests(unittest.TestCase):
         self.assertIn("IMS-SPRINT-20260628-002: Validate Intake Candidate Lifecycle", issue_text)
         self.assertIn("Validate Intake Candidate Lifecycle using the documented candidate lifecycle before implementation.", work_order_text)
 
+    def test_work_order_preflight_resolves_from_hydrated_issue(self) -> None:
+        result = conductor._resolve_work_order_preflight(self.root, "WO-20260628-006")
+        self.assertEqual(result["status"], "READY")
+        self.assertEqual(result["title"], "Hydrate work-order issuance from existing GitHub issues")
+        self.assertIn("fourseasonsft/worklog-viewer", result["target_repos"])
+
+    def test_work_order_preflight_rejects_missing_metadata(self) -> None:
+        result = conductor._resolve_work_order_preflight(self.root, "WO-DOES-NOT-EXIST")
+        self.assertEqual(result["status"], "REPAIRED_AND_READY")
+        self.assertEqual(result["source"], "active_work")
+
     def test_work_order_issue_rolls_back_on_partial_failure(self) -> None:
         original = conductor._work_order_packet_artifact
 
