@@ -106,9 +106,52 @@ def _parse_shortcode_request(path: Path) -> dict[str, str]:
         "title": title,
         "request_id": meta.get("request_id") or str(path.relative_to(path.parents[2])),
         "requester_email": meta.get("requester_email") or "",
+        "target_repos": meta.get("target repos") or meta.get("target_repo") or meta.get("target_repo_primary") or "",
         "shortcode": shortcode.strip(),
         "text": text,
     }
+
+
+def _parse_issue_metadata(text: str) -> dict[str, str]:
+    meta = _parse_key_values(text)
+    target_repos = meta.get("target repos") or meta.get("target_repo") or ""
+    if not target_repos:
+        match = re.search(r"^Target Repos:\s*(.+)$", text, flags=re.M)
+        if match:
+            target_repos = match.group(1).strip()
+    objective = meta.get("objective") or ""
+    if not objective:
+        match = re.search(r"^Objective:\s*(.+)$", text, flags=re.M)
+        if match:
+            objective = match.group(1).strip()
+    title = ""
+    match = re.search(r"^#\s+GitHub Issue:\s*(.+)$", text, flags=re.M)
+    if match:
+        title = match.group(1).strip()
+    return {
+        "title": title,
+        "objective": objective,
+        "target_repos": target_repos,
+    }
+
+
+def _find_issue_request(root: Path, work_order_id: str) -> dict[str, str] | None:
+    request_path = root / ISSUES_RELATIVE / f"{work_order_id}.md"
+    if not request_path.exists():
+        return None
+    text = _read_text(request_path)
+    issue_meta = _parse_issue_metadata(text)
+    issue_meta["path"] = str(request_path)
+    issue_meta["text"] = text
+    issue_meta["work_order_id"] = work_order_id
+    return issue_meta
+
+
+def _parse_issue_title(text: str) -> str:
+    match = re.search(r"^#\s+GitHub Issue:\s*(.+)$", text, flags=re.M)
+    if match:
+        return match.group(1).strip()
+    return ""
 
 
 def _parse_work_order_packet(path: Path) -> dict[str, object]:
@@ -299,8 +342,17 @@ def _write_atomic_text(path: Path, content: str) -> None:
             tmp_path.unlink()
 
 
-def _work_order_issue_artifact(root: Path, work_order_id: str, title: str, objective: str) -> Path:
+def _normalize_repo_list(raw: str) -> list[str]:
+    return [
+        item.strip()
+        for item in re.split(r"[,;\n]+", raw or "")
+        if item.strip()
+    ]
+
+
+def _work_order_issue_artifact(root: Path, work_order_id: str, title: str, objective: str, target_repos: list[str]) -> Path:
     target = root / ISSUES_RELATIVE / f"{work_order_id}.md"
+    target_repos_text = ", ".join(target_repos)
     body = "\n".join(
         [
             f"# GitHub Issue: {title}",
@@ -310,18 +362,21 @@ def _work_order_issue_artifact(root: Path, work_order_id: str, title: str, objec
             "- status: open",
             f"- work_order_id: {work_order_id}",
             f"- objective: {objective}",
+            f"- target_repos: {target_repos_text}",
             "",
             "## Body",
             f"Work Order ID: {work_order_id}",
             f"Objective: {objective}",
+            f"Target Repos: {target_repos_text}",
         ]
     )
     _write_atomic_text(target, body + "\n")
     return target
 
 
-def _work_order_packet_artifact(root: Path, work_order_id: str, title: str, objective: str) -> Path:
+def _work_order_packet_artifact(root: Path, work_order_id: str, title: str, objective: str, target_repos: list[str]) -> Path:
     target = root / "07-work-orders" / f"{work_order_id}.md"
+    target_repos_text = ", ".join(target_repos)
     body = "\n".join(
         [
             f"# {work_order_id}",
@@ -329,8 +384,8 @@ def _work_order_packet_artifact(root: Path, work_order_id: str, title: str, obje
             "Status: Requested",
             f"Created: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
             "Requested By: David",
-            "Primary App: Worklog",
-            "Secondary System: Conductor",
+            f"Primary App: {target_repos[0] if target_repos else 'Worklog'}",
+            f"Secondary System: {target_repos_text if target_repos_text else 'Conductor'}",
             "Related Codex Shortcode: `/codex:fsft-work-order`",
             "",
             "## Objective",
@@ -352,12 +407,13 @@ def _work_order_packet_artifact(root: Path, work_order_id: str, title: str, obje
     return target
 
 
-def issue_work_order(root: Path, work_order_id: str, title: str, objective: str) -> dict[str, object]:
+def issue_work_order(root: Path, work_order_id: str, title: str, objective: str, target_repos: list[str] | None = None) -> dict[str, object]:
     issue_path: Path | None = None
     work_order_path: Path | None = None
+    target_repos = target_repos or ["fourseasonsft/worklog"]
     try:
-        issue_path = _work_order_issue_artifact(root, work_order_id, title, objective)
-        work_order_path = _work_order_packet_artifact(root, work_order_id, title, objective)
+        issue_path = _work_order_issue_artifact(root, work_order_id, title, objective, target_repos)
+        work_order_path = _work_order_packet_artifact(root, work_order_id, title, objective, target_repos)
     except Exception:
         if issue_path and issue_path.exists():
             issue_path.unlink()
@@ -368,6 +424,7 @@ def issue_work_order(root: Path, work_order_id: str, title: str, objective: str)
         "work_order_id": work_order_id,
         "issue_path": str(issue_path.relative_to(root)),
         "work_order_path": str(work_order_path.relative_to(root)),
+        "target_repos": target_repos,
     }
 
 
@@ -518,8 +575,9 @@ def build_parser() -> argparse.ArgumentParser:
     work_order_fu.add_argument("work_order_id")
     work_order_issue = work_order_sub.add_parser("issue", help="Issue a new work order transactionally.")
     work_order_issue.add_argument("work_order_id")
-    work_order_issue.add_argument("--title", required=True)
-    work_order_issue.add_argument("--objective", required=True)
+    work_order_issue.add_argument("--title")
+    work_order_issue.add_argument("--objective")
+    work_order_issue.add_argument("--target-repos")
 
     sprint = subparsers.add_parser("sprint", help="Inspect or repair sprint records.")
     sprint_sub = sprint.add_subparsers(dest="sprint_command", required=True)
@@ -637,7 +695,20 @@ def main(argv: list[str] | None = None) -> int:
             _emit(payload, args.json_mode)
             return 0
         if args.command == "work-order" and args.work_order_command == "issue":
-            result = issue_work_order(root, args.work_order_id, args.title, args.objective)
+            issue_request = _find_issue_request(root, args.work_order_id)
+            title = args.title or (issue_request["title"] if issue_request else "")
+            objective = args.objective or (issue_request["objective"] if issue_request else "")
+            target_repos = _normalize_repo_list(args.target_repos) if args.target_repos else []
+            if issue_request:
+                if not title:
+                    title = _parse_issue_title(issue_request["text"]) or issue_request["title"]
+                if not objective:
+                    objective = issue_request["objective"]
+                if not target_repos and issue_request.get("target_repos"):
+                    target_repos = _normalize_repo_list(issue_request["target_repos"])
+            if not title or not objective:
+                raise FileNotFoundError(f"Matching GitHub issue not found for work order {args.work_order_id}")
+            result = issue_work_order(root, args.work_order_id, title, objective, target_repos or None)
             payload = {
                 "summary": f"Work order {args.work_order_id} issued",
                 "current_context": result,
@@ -657,7 +728,12 @@ def main(argv: list[str] | None = None) -> int:
                 ctx,
                 f"work-order issue {args.work_order_id}",
                 result["work_order_path"],
-                {"work_order_id": args.work_order_id, "title": args.title, "objective": args.objective},
+                {
+                    "work_order_id": args.work_order_id,
+                    "title": title,
+                    "objective": objective,
+                    "target_repos": result.get("target_repos", []),
+                },
                 "work order issued transactionally",
                 [result["issue_path"], result["work_order_path"]],
                 [],

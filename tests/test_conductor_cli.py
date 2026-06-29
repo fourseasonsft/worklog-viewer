@@ -27,6 +27,20 @@ class ConductorCliTests(unittest.TestCase):
             "# Shortcode Test\n\n- request_id: 04-inbox/requests/2026-06-27-shortcode-test.md\n- request_title: Shortcode Test\n- requester_email: david@example.com\n- shortcode: SHORTCODE-ENGINE-001\n",
             encoding="utf-8",
         )
+        (self.root / "04-inbox" / "requests" / "WO-20260628-006.md").write_text(
+            "# GitHub Issue: Hydrate work-order issuance from existing GitHub issues\n\n"
+            "- issue_id: WO-20260628-006\n"
+            "- issue_type: work_order_issuance\n"
+            "- status: open\n"
+            "- work_order_id: WO-20260628-006\n"
+            "- objective: When #/work-order issue <ID> is executed, the issuer must read the matching GitHub issue and create the Git-backed Worklog packet without asking the operator to re-enter the objective or target repositories.\n"
+            "- target_repos: fourseasonsft/worklog-viewer, fourseasonsft/fsft-worklog\n\n"
+            "## Body\n"
+            "Work Order ID: WO-20260628-006\n"
+            "Objective: When #/work-order issue <ID> is executed, the issuer must read the matching GitHub issue and create the Git-backed Worklog packet without asking the operator to re-enter the objective or target repositories.\n"
+            "Target Repos: fourseasonsft/worklog-viewer, fourseasonsft/fsft-worklog\n",
+            encoding="utf-8",
+        )
         (self.root / "07-work-orders").mkdir(parents=True, exist_ok=True)
         (self.root / "07-work-orders" / "WO-20260627-012-work-order-follow-up-routing.md").write_text(
             "# WO-20260627-012-work-order-follow-up-routing\n\n"
@@ -168,25 +182,33 @@ class ConductorCliTests(unittest.TestCase):
             "--json",
             "work-order",
             "issue",
-            "WO-20260627-014-work-order-issuance-transaction",
-            "--title",
-            "Work Order Issuance Transaction",
-            "--objective",
-            "Implement Work Order issuance transactionally.",
+            "WO-20260628-006",
         ])
         self.assertEqual(code, 0)
-        issue_path = self.root / "04-inbox" / "requests" / "WO-20260627-014-work-order-issuance-transaction.md"
-        work_order_path = self.root / "07-work-orders" / "WO-20260627-014-work-order-issuance-transaction.md"
+        issue_path = self.root / "04-inbox" / "requests" / "WO-20260628-006.md"
+        work_order_path = self.root / "07-work-orders" / "WO-20260628-006.md"
         self.assertTrue(issue_path.exists())
         self.assertTrue(work_order_path.exists())
         content = work_order_path.read_text(encoding="utf-8")
-        self.assertIn("Transactional issuance should create both", content)
-        self.assertIn("Work Order ID: WO-20260627-014-work-order-issuance-transaction", issue_path.read_text(encoding="utf-8"))
+        self.assertIn("Hydrate work-order issuance from existing GitHub issues", issue_path.read_text(encoding="utf-8"))
+        self.assertIn("Primary App: fourseasonsft/worklog-viewer", content)
+        self.assertIn("Secondary System: fourseasonsft/worklog-viewer, fourseasonsft/fsft-worklog", content)
+
+    def test_work_order_issue_requires_matching_issue_when_unhydrated(self) -> None:
+        code = conductor.main([
+            "--worklog-root",
+            str(self.root),
+            "--json",
+            "work-order",
+            "issue",
+            "WO-DOES-NOT-EXIST",
+        ])
+        self.assertEqual(code, 1)
 
     def test_work_order_issue_rolls_back_on_partial_failure(self) -> None:
         original = conductor._work_order_packet_artifact
 
-        def fail_once(root, work_order_id, title, objective):
+        def fail_once(root, work_order_id, title, objective, target_repos=None):
             raise RuntimeError("simulated failure")
 
         conductor._work_order_packet_artifact = fail_once
